@@ -1,8 +1,8 @@
+[phases.setup]
+nixPkgs = ["nodejs-22_x", "npm-9_x"]
+
 [phases.build]
 cmds = ["cd figma-smart-image-mcp && npm install", "cd figma-smart-image-mcp && npm run build"]
-
-[phases.start]
-cmd = "cd figma-smart-image-mcp && node dist/server.js --transport http --port $PORT"
 
 [start]
 cmd = "cd figma-smart-image-mcp && node dist/server.js --transport http --port $PORT"
