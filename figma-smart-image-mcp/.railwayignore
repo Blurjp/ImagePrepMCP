@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+src/
+*.ts
+*.log
+.env
+.DS_Store
+.git/
+.gitignore
+README.md
+.vscode/
+.idea/

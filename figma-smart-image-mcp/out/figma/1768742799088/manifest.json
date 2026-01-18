@@ -1,0 +1,81 @@
+{
+  "version": "1.0.0",
+  "timestamp": 1768742804025,
+  "selected": {
+    "fileKey": "o5ucyn5Pm8Fhb9CNTSGkp9",
+    "nodeId": "1:249",
+    "sourceFormatUsed": "svg",
+    "originalPath": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/source.svg"
+  },
+  "overview": {
+    "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/source_overview.webp",
+    "bytes": 196602,
+    "width": 3840,
+    "height": 2160,
+    "format": "webp",
+    "quality": 95,
+    "scaleFactor": 1
+  },
+  "tiles": [
+    {
+      "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/tiles/tile_0_0.webp",
+      "x": 0,
+      "y": 0,
+      "w": 1536,
+      "h": 1536,
+      "bytes": 29370,
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/tiles/tile_0_1.webp",
+      "x": 1440,
+      "y": 0,
+      "w": 1536,
+      "h": 1536,
+      "bytes": 27502,
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/tiles/tile_0_2.webp",
+      "x": 2304,
+      "y": 0,
+      "w": 960,
+      "h": 1536,
+      "bytes": 22416,
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/tiles/tile_1_0.webp",
+      "x": 0,
+      "y": 624,
+      "w": 1536,
+      "h": 720,
+      "bytes": 22904,
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/tiles/tile_1_1.webp",
+      "x": 1440,
+      "y": 624,
+      "w": 1536,
+      "h": 720,
+      "bytes": 26366,
+      "width": 3840,
+      "height": 2160
+    },
+    {
+      "path": "/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/out/figma/1768742799088/tiles/tile_1_2.webp",
+      "x": 2304,
+      "y": 624,
+      "w": 960,
+      "h": 720,
+      "bytes": 20948,
+      "width": 3840,
+      "height": 2160
+    }
+  ]
+}
