@@ -1232,9 +1232,14 @@ class FigmaSmartImageServer {
   }
 }
 
-// Start the server
-const server = new FigmaSmartImageServer(TRANSPORT_MODE);
-server.run().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exit(1);
-});
+// Start the server if running directly (not imported by Vercel)
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1].endsWith('/server.js')) {
+  const server = new FigmaSmartImageServer(TRANSPORT_MODE);
+  server.run().catch((error) => {
+    console.error("Fatal error:", error);
+    process.exit(1);
+  });
+}
+
+// Export for Vercel/other platforms
+export { FigmaSmartImageServer };
