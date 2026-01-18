@@ -1,6 +1,5 @@
 node_modules/
 out/
-dist/
 src/
 *.ts
 *.log
@@ -11,3 +10,4 @@ src/
 README.md
 .vscode/
 .idea/
+.railwayignore
