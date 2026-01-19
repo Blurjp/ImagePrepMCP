@@ -592,16 +592,18 @@ class FigmaSmartImageServer {
                         }
                         // Check sessionTokens first (more reliable than deviceCodes)
                         const sessionToken = await sessionTokensStorage.get(deviceCode);
-                        console.error(`[OAuth Token] sessionTokensStorage.get(${deviceCode}): ${JSON.stringify(sessionToken)}`);
+                        const hasSessionToken = sessionToken ? "YES" : "NO";
+                        console.error(`[OAuth Token] sessionTokensStorage.get(${deviceCode}): ${hasSessionToken}`);
                         let hasAuthenticated = !!sessionToken;
                         // If not in sessionTokens, try deviceCodes
                         let deviceInfo = null;
                         if (!hasAuthenticated) {
                             deviceInfo = await deviceCodesStorage.get(deviceCode);
-                            console.error(`[OAuth Token] deviceCodesStorage.get(${deviceCode}): ${JSON.stringify(deviceInfo)}`);
+                            const hasDeviceInfo = deviceInfo ? "YES" : "NO";
+                            console.error(`[OAuth Token] deviceCodesStorage.get(${deviceCode}): ${hasDeviceInfo}`);
                             hasAuthenticated = deviceInfo?.verified && (deviceInfo?.figmaToken || this.figmaToken);
                         }
-                        console.error(`[OAuth Token PID:${process.pid}] Device: ${deviceCode}, sessionToken: ${!!sessionToken}, deviceInfo: ${!!deviceInfo}, authenticated: ${hasAuthenticated}`);
+                        console.error(`[OAuth Token] Device: ${deviceCode}, sessionToken: ${!!sessionToken}, deviceInfo: ${!!deviceInfo}, authenticated: ${hasAuthenticated}`);
                         if (hasAuthenticated) {
                             // User has authenticated - return success
                             res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
