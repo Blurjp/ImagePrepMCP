@@ -148,7 +148,7 @@ class FigmaSmartImageServer {
     server;
     figmaToken; // Default token (from env/file for local dev)
     transportMode;
-    // Device codes for OAuth flow - store token when user authenticates via web UI
+    // Device codes for OAuth flow - using Object instead of Map due to Map corruption issues
     deviceCodes;
     // Multi-tenant: Store tokens per session for hosted deployments
     sessionTokens;
@@ -158,7 +158,7 @@ class FigmaSmartImageServer {
         this.transportMode = transportMode;
         // Load token from: 1) Environment variable, 2) File, 3) Empty
         this.figmaToken = process.env.FIGMA_TOKEN || loadTokenFromFile() || "";
-        this.deviceCodes = new Map();
+        this.deviceCodes = {};
         this.sessionTokens = new Map();
         this.sessionTransports = new Map();
         // Rate limiting: 100 requests per minute per IP
@@ -186,7 +186,7 @@ class FigmaSmartImageServer {
             return sessionData.token;
         }
         // Check if sessionId is a device code (for OAuth flow)
-        const deviceData = this.deviceCodes.get(sessionId);
+        const deviceData = this.deviceCodes[sessionId];
         if (deviceData?.figmaToken) {
             return deviceData.figmaToken;
         }
@@ -584,11 +584,11 @@ class FigmaSmartImageServer {
                             return;
                         }
                         // WORKAROUND: Direct .get() sometimes fails, so iterate to find
-                        let deviceInfo = this.deviceCodes.get(deviceCode);
+                        let deviceInfo = this.deviceCodes[deviceCode];
                         if (!deviceInfo) {
-                            console.error(`[OAuth Token] Direct .get() failed, iterating to find device code: ${deviceCode}`);
+                            console.error(`[OAuth Token] Direct lookup failed, iterating to find device code: ${deviceCode}`);
                             // Fallback: iterate through all entries to find the device code
-                            for (const [dc, di] of this.deviceCodes.entries()) {
+                            for (const [dc, di] of Object.entries(this.deviceCodes)) {
                                 if (dc === deviceCode) {
                                     deviceInfo = di;
                                     console.error(`[OAuth Token] Found device code via iteration: ${dc}`);
@@ -596,7 +596,7 @@ class FigmaSmartImageServer {
                                 }
                             }
                         }
-                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Map size: ${this.deviceCodes.size}, All codes: ${Array.from(this.deviceCodes.keys()).join(', ')}`);
+                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Total codes: ${Object.keys(this.deviceCodes).length}, All codes: ${Object.keys(this.deviceCodes).join(', ')}`);
                         if (!deviceInfo) {
                             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                             res.end(JSON.stringify({
@@ -607,7 +607,7 @@ class FigmaSmartImageServer {
                         }
                         // Check if expired (10 minutes)
                         if (Date.now() - deviceInfo.createdAt > 600000) {
-                            this.deviceCodes.delete(deviceCode);
+                            delete this.deviceCodes[deviceCode];
                             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                             res.end(JSON.stringify({
                                 error: "expired_token",
@@ -665,13 +665,13 @@ class FigmaSmartImageServer {
                         const deviceCode = "device_" + Math.random().toString(36).substring(2, 15);
                         const userCode = Math.random().toString(36).substring(2, 8).toUpperCase();
                         // Store device code for later verification
-                        this.deviceCodes.set(deviceCode, {
+                        this.deviceCodes[deviceCode] = {
                             userCode,
                             clientId: clientId || "unknown",
                             createdAt: Date.now(),
                             verified: !!this.figmaToken, // Auto-verify if token already exists
-                        });
-                        console.error(`[Device Authorize] Created device code: ${deviceCode}, user_code: ${userCode}, Map size now: ${this.deviceCodes.size}`);
+                        };
+                        console.error(`[Device Authorize] Created device code: ${deviceCode}, user_code: ${userCode}, Total codes now: ${Object.keys(this.deviceCodes).length}`);
                         // Use Railway domain if available, otherwise localhost
                         const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
                             ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
@@ -751,9 +751,9 @@ class FigmaSmartImageServer {
                             if (userCode) {
                                 // Multi-tenant mode via OAuth device code flow
                                 // Find the device code by user code
-                                console.error(`[Auth] Looking for user code: ${userCode}, All codes: ${Array.from(this.deviceCodes.entries()).map(([k, v]) => `${k}:${v.userCode}`).join(', ')}`);
+                                console.error(`[Auth] Looking for user code: ${userCode}, All codes: ${Object.entries(this.deviceCodes).map(([k, v]) => `${k}:${v.userCode}`).join(', ')}`);
                                 let foundDeviceCode = null;
-                                for (const [deviceCode, deviceInfo] of this.deviceCodes.entries()) {
+                                for (const [deviceCode, deviceInfo] of Object.entries(this.deviceCodes)) {
                                     if (deviceInfo.userCode === userCode) {
                                         foundDeviceCode = deviceCode;
                                         break;
@@ -762,7 +762,7 @@ class FigmaSmartImageServer {
                                 console.error(`[Auth] Found device code: ${foundDeviceCode}`);
                                 if (foundDeviceCode && token) {
                                     // Store the Figma token with this device code
-                                    const deviceInfo = this.deviceCodes.get(foundDeviceCode);
+                                    const deviceInfo = this.deviceCodes[foundDeviceCode];
                                     if (deviceInfo) {
                                         deviceInfo.figmaToken = token;
                                         deviceInfo.verified = true;
