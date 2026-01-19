@@ -1,6 +1,5 @@
 node_modules/
 out/
-*.ts
 *.log
 .env
 .DS_Store
@@ -10,9 +9,10 @@ README.md
 .vscode/
 .idea/
 package-lock.json
+*.ts
+!figma-smart-image-mcp/src/**/*.ts
 figma-smart-image-mcp/node_modules/
 figma-smart-image-mcp/out/
-figma-smart-image-mcp/*.ts
 figma-smart-image-mcp/*.log
 figma-smart-image-mcp/.env
 figma-smart-image-mcp/.DS_Store
