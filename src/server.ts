@@ -707,7 +707,7 @@ class FigmaSmartImageServer {
               }
             }
 
-            console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Total codes: ${Object.keys(this.deviceCodes).length}, All codes: ${Object.keys(this.deviceCodes).join(', ')}`);
+            console.error(`[OAuth Token PID:${process.pid}] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Total codes: ${Object.keys(this.deviceCodes).length}, All codes: ${Object.keys(this.deviceCodes).join(', ')}`);
             if (!deviceInfo) {
               res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
               res.end(JSON.stringify({
@@ -787,7 +787,7 @@ class FigmaSmartImageServer {
               createdAt: Date.now(),
               verified: !!this.figmaToken, // Auto-verify if token already exists
             };
-            console.error(`[Device Authorize] Created device code: ${deviceCode}, user_code: ${userCode}, Total codes now: ${Object.keys(this.deviceCodes).length}`);
+            console.error(`[Device Authorize PID:${process.pid}] Created device code: ${deviceCode}, user_code: ${userCode}, Total codes now: ${Object.keys(this.deviceCodes).length}`);
 
             // Use Railway domain if available, otherwise localhost
             const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -891,7 +891,7 @@ class FigmaSmartImageServer {
                   if (deviceInfo) {
                     deviceInfo.figmaToken = token;
                     deviceInfo.verified = true;
-                    console.error(`[Auth] Updated device code ${foundDeviceCode} with token and verified=true`);
+                    console.error(`[Auth PID:${process.pid}] Updated device code ${foundDeviceCode} with token and verified=true`);
                   }
                   res.writeHead(200, { "Content-Type": "application/json" });
                   res.end(JSON.stringify({ success: true, authenticated: true }));
