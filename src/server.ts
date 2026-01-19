@@ -35,6 +35,7 @@ import {
   getDisplayPath,
   formatBytes,
 } from "./util/fs.js";
+import { deviceCodesStorage, sessionTokensStorage, getRedisClient } from "./redis.js";
 
 // Tool input schemas
 const ProcessFigmaLinkInputSchema = z.object({
@@ -175,35 +176,28 @@ class RateLimiter {
   }
 }
 
-// Type for device code storage
-interface DeviceCodeInfo {
-  userCode: string;
-  clientId: string;
-  createdAt: number;
-  verified: boolean;
-  figmaToken?: string;
-}
-
 class FigmaSmartImageServer {
   private server: Server;
   private figmaToken: string;  // Default token (from env/file for local dev)
   private transportMode: TransportMode;
-  // Device codes for OAuth flow - using Object instead of Map due to Map corruption issues
-  private deviceCodes: Record<string, DeviceCodeInfo>;
-  // Multi-tenant: Store tokens per session for hosted deployments
-  private sessionTokens: Map<string, { token: string; createdAt: number }>;
-  private sessionTransports: Map<string, any>;  // Track transports per session
+  private sessionTransports: Map<string, any>;  // Track transports per session (in-memory, per-instance)
   private rateLimiter: RateLimiter;
 
   constructor(transportMode: TransportMode = "stdio") {
     this.transportMode = transportMode;
     // Load token from: 1) Environment variable, 2) File, 3) Empty
     this.figmaToken = process.env.FIGMA_TOKEN || loadTokenFromFile() || "";
-    this.deviceCodes = {};
-    this.sessionTokens = new Map();
     this.sessionTransports = new Map();
     // Rate limiting: 100 requests per minute per IP
     this.rateLimiter = new RateLimiter(100, 60000);
+
+    // Initialize Redis connection
+    const redis = getRedisClient();
+    if (redis) {
+      console.error(`[Server] Using Redis for multi-tenant storage`);
+    } else {
+      console.error(`[Server] REDIS_URL not set, using in-memory storage (single-instance only)`);
+    }
 
     // Clean up expired sessions every 5 minutes
     setInterval(() => this.cleanupExpiredSessions(), 5 * 60 * 1000);
@@ -226,31 +220,36 @@ class FigmaSmartImageServer {
   /**
    * Get token for a specific session
    * Returns session token if available, otherwise falls back to global token
-   * Also checks if this sessionId matches any device code (for OAuth flow)
+   * Checks Redis first, then device codes (for OAuth flow)
    */
-  private getTokenForSession(sessionId: string): string {
-    const sessionData = this.sessionTokens.get(sessionId);
-    if (sessionData && sessionData.token) {
+  private async getTokenForSession(sessionId: string): Promise<string> {
+    // Check session tokens in Redis
+    const sessionData = await sessionTokensStorage.get(sessionId);
+    if (sessionData?.token) {
       return sessionData.token;
     }
-    // Check if sessionId is a device code (for OAuth flow)
-    const deviceData = this.deviceCodes[sessionId];
+
+    // Check device codes in Redis (for OAuth flow)
+    const deviceData = await deviceCodesStorage.get(sessionId);
     if (deviceData?.figmaToken) {
       return deviceData.figmaToken;
     }
+
     return this.figmaToken;
   }
 
   /**
    * Clean up expired sessions (older than 1 hour)
+   * Note: Redis handles TTL automatically, this is for in-memory fallback
    */
   private cleanupExpiredSessions(): void {
+    // Redis handles TTL automatically, so no cleanup needed there
+    // Only clean up in-memory transports
     const now = Date.now();
-    const maxAge = 60 * 60 * 1000; // 1 hour
-
-    for (const [sessionId, data] of this.sessionTokens.entries()) {
-      if (now - data.createdAt > maxAge) {
-        this.sessionTokens.delete(sessionId);
+    for (const [sessionId, transport] of this.sessionTransports.entries()) {
+      // Clean up stale transports (no activity for 1 hour)
+      // Note: sessionTransports is per-instance and doesn't need Redis
+      if (transport && (now - (transport as any).lastActivity > 60 * 60 * 1000)) {
         this.sessionTransports.delete(sessionId);
       }
     }
@@ -298,7 +297,7 @@ class FigmaSmartImageServer {
   private async handleProcessFigmaLink(args: ProcessFigmaLinkArgs) {
     // Extract session ID from metadata if available (for multi-tenant support)
     const sessionId = (args as any)._meta?.sessionId;
-    const token = this.getTokenForSession(sessionId || "");
+    const token = await this.getTokenForSession(sessionId || "");
 
     if (!token) {
       return {
@@ -677,7 +676,7 @@ class FigmaSmartImageServer {
       if (url.pathname === "/oauth/token" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => { body += chunk.toString(); });
-        req.on("end", () => {
+        req.on("end", async () => {
           const params = new URLSearchParams(body);
           const grantType = params.get("grant_type");
           const deviceCode = params.get("device_code");
@@ -693,15 +692,15 @@ class FigmaSmartImageServer {
               return;
             }
 
-            // WORKAROUND: Check sessionTokens first (more reliable than deviceCodes)
-            let sessionToken = this.sessionTokens.get(deviceCode);
+            // Check sessionTokens first (more reliable than deviceCodes)
+            const sessionToken = await sessionTokensStorage.get(deviceCode);
             let hasAuthenticated = !!sessionToken;
 
-            // If not in sessionTokens, try deviceCodes (may fail due to corruption)
+            // If not in sessionTokens, try deviceCodes
             let deviceInfo = null;
             if (!hasAuthenticated) {
-              deviceInfo = this.deviceCodes[deviceCode];
-              hasAuthenticated = !!(deviceInfo?.verified && (deviceInfo.figmaToken || this.figmaToken));
+              deviceInfo = await deviceCodesStorage.get(deviceCode);
+              hasAuthenticated = deviceInfo?.verified && (deviceInfo?.figmaToken || this.figmaToken);
             }
 
             console.error(`[OAuth Token PID:${process.pid}] Device: ${deviceCode}, sessionToken: ${!!sessionToken}, deviceInfo: ${!!deviceInfo}, authenticated: ${hasAuthenticated}`);
@@ -718,7 +717,7 @@ class FigmaSmartImageServer {
             }
 
             // Check if device code exists at all
-            const deviceExists = this.deviceCodes[deviceCode] || sessionToken;
+            const deviceExists = await deviceCodesStorage.get(deviceCode) || sessionToken;
             if (!deviceExists) {
               res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
               res.end(JSON.stringify({
@@ -752,7 +751,7 @@ class FigmaSmartImageServer {
       if (url.pathname === "/device/authorize" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => { body += chunk.toString(); });
-        req.on("end", () => {
+        req.on("end", async () => {
           try {
             const params = new URLSearchParams(body);
             const clientId = params.get("client_id");
@@ -761,14 +760,14 @@ class FigmaSmartImageServer {
             const deviceCode = "device_" + Math.random().toString(36).substring(2, 15);
             const userCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-            // Store device code for later verification
-            this.deviceCodes[deviceCode] = {
+            // Store device code in Redis for later verification
+            await deviceCodesStorage.set(deviceCode, {
               userCode,
               clientId: clientId || "unknown",
               createdAt: Date.now(),
               verified: !!this.figmaToken, // Auto-verify if token already exists
-            };
-            console.error(`[Device Authorize PID:${process.pid}] Created device code: ${deviceCode}, user_code: ${userCode}, Total codes now: ${Object.keys(this.deviceCodes).length}`);
+            });
+            console.error(`[Device Authorize PID:${process.pid}] Created device code: ${deviceCode}, user_code: ${userCode}`);
 
             // Use Railway domain if available, otherwise localhost
             const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
@@ -809,11 +808,14 @@ class FigmaSmartImageServer {
 
       // Health check endpoint
       if (url.pathname === "/health") {
+        const redis = getRedisClient();
+        const deviceCodeKeys = await deviceCodesStorage.keys();
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           status: "ok",
           hasToken: !!this.figmaToken,
-          activeSessions: this.sessionTokens.size,
+          redis: redis ? "connected" : "disconnected (using in-memory fallback)",
+          activeDevices: deviceCodeKeys.length,
           activeTransports: this.sessionTransports.size,
         }));
         return;
@@ -830,14 +832,17 @@ class FigmaSmartImageServer {
       if (url.pathname === "/auth") {
         if (req.method === "GET") {
           // Check if a specific session is being queried
-          const sessionId = url.searchParams.get("session_id");
-          const hasToken = sessionId ? !!this.sessionTokens.get(sessionId)?.token : !!this.figmaToken;
+          (async () => {
+            const sessionId = url.searchParams.get("session_id");
+            const sessionData = sessionId ? await sessionTokensStorage.get(sessionId) : null;
+            const hasToken = sessionId ? !!sessionData?.token : !!this.figmaToken;
 
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({
-            authenticated: hasToken,
-            hasToken: hasToken
-          }));
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              authenticated: hasToken,
+              hasToken: hasToken
+            }));
+          })();
           return;
         }
 
@@ -846,7 +851,7 @@ class FigmaSmartImageServer {
           req.on("data", (chunk) => {
             body += chunk.toString();
           });
-          req.on("end", () => {
+          req.on("end", async () => {
             try {
               const params = new URLSearchParams(body);
               const token = params.get("token") || "";
@@ -855,10 +860,11 @@ class FigmaSmartImageServer {
 
               if (userCode) {
                 // Multi-tenant mode via OAuth device code flow
-                // Find the device code by user code
-                console.error(`[Auth] Looking for user code: ${userCode}, All codes: ${Object.entries(this.deviceCodes).map(([k, v]) => `${k}:${v.userCode}`).join(', ')}`);
+                // Find the device code by user code in Redis
+                console.error(`[Auth] Looking for user code: ${userCode}`);
+                const entries = await deviceCodesStorage.entries();
                 let foundDeviceCode = null;
-                for (const [deviceCode, deviceInfo] of Object.entries(this.deviceCodes)) {
+                for (const [deviceCode, deviceInfo] of entries) {
                   if (deviceInfo.userCode === userCode) {
                     foundDeviceCode = deviceCode;
                     break;
@@ -867,20 +873,20 @@ class FigmaSmartImageServer {
 
                 console.error(`[Auth] Found device code: ${foundDeviceCode}`);
                 if (foundDeviceCode && token) {
-                  // WORKAROUND: Store token directly in sessionTokens using deviceCode as key
-                  // This bypasses the deviceCodes Map/Object corruption issue
-                  this.sessionTokens.set(foundDeviceCode, {
+                  // Store token in Redis sessionTokens using deviceCode as key
+                  await sessionTokensStorage.set(foundDeviceCode, {
                     token,
                     createdAt: Date.now(),
                   });
-                  // Also update deviceCodes for potential future use
-                  const deviceInfo = this.deviceCodes[foundDeviceCode];
+                  // Also update deviceCodes in Redis
+                  const deviceInfo = await deviceCodesStorage.get(foundDeviceCode);
                   if (deviceInfo) {
                     deviceInfo.figmaToken = token;
                     deviceInfo.verified = true;
+                    await deviceCodesStorage.set(foundDeviceCode, deviceInfo);
                     console.error(`[Auth PID:${process.pid}] Updated device code ${foundDeviceCode} with token and verified=true`);
                   }
-                  console.error(`[Auth PID:${process.pid}] Also stored token in sessionTokens with key: ${foundDeviceCode}`);
+                  console.error(`[Auth PID:${process.pid}] Stored token in sessionTokens with key: ${foundDeviceCode}`);
                   res.writeHead(200, { "Content-Type": "application/json" });
                   res.end(JSON.stringify({ success: true, authenticated: true }));
                 } else if (foundDeviceCode) {
@@ -893,7 +899,7 @@ class FigmaSmartImageServer {
               } else if (sessionId) {
                 // Multi-tenant mode: store token for this session
                 if (token) {
-                  this.sessionTokens.set(sessionId, {
+                  await sessionTokensStorage.set(sessionId, {
                     token,
                     createdAt: Date.now(),
                   });
@@ -935,11 +941,11 @@ class FigmaSmartImageServer {
           this.sessionTransports.set(transport.sessionId, transport);
 
           // Clean up when connection closes
-          res.on("close", () => {
+          res.on("close", async () => {
             transports.delete(transport.sessionId);
             this.sessionTransports.delete(transport.sessionId);
-            // Also clean up session token on disconnect
-            this.sessionTokens.delete(transport.sessionId);
+            // Also clean up session token on disconnect (from Redis)
+            await sessionTokensStorage.delete(transport.sessionId);
           });
 
           return;

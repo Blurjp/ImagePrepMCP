@@ -12,19 +12,18 @@ declare class FigmaSmartImageServer {
     private server;
     private figmaToken;
     private transportMode;
-    private deviceCodes;
-    private sessionTokens;
     private sessionTransports;
     private rateLimiter;
     constructor(transportMode?: TransportMode);
     /**
      * Get token for a specific session
      * Returns session token if available, otherwise falls back to global token
-     * Also checks if this sessionId matches any device code (for OAuth flow)
+     * Checks Redis first, then device codes (for OAuth flow)
      */
     private getTokenForSession;
     /**
      * Clean up expired sessions (older than 1 hour)
+     * Note: Redis handles TTL automatically, this is for in-memory fallback
      */
     private cleanupExpiredSessions;
     private setupHandlers;
