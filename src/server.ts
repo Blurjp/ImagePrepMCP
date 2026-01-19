@@ -693,22 +693,33 @@ class FigmaSmartImageServer {
               return;
             }
 
-            // WORKAROUND: Direct .get() sometimes fails, so iterate to find
-            let deviceInfo = this.deviceCodes[deviceCode];
-            if (!deviceInfo) {
-              console.error(`[OAuth Token] Direct lookup failed, iterating to find device code: ${deviceCode}`);
-              // Fallback: iterate through all entries to find the device code
-              for (const [dc, di] of Object.entries(this.deviceCodes)) {
-                if (dc === deviceCode) {
-                  deviceInfo = di;
-                  console.error(`[OAuth Token] Found device code via iteration: ${dc}`);
-                  break;
-                }
-              }
+            // WORKAROUND: Check sessionTokens first (more reliable than deviceCodes)
+            let sessionToken = this.sessionTokens.get(deviceCode);
+            let hasAuthenticated = !!sessionToken;
+
+            // If not in sessionTokens, try deviceCodes (may fail due to corruption)
+            let deviceInfo = null;
+            if (!hasAuthenticated) {
+              deviceInfo = this.deviceCodes[deviceCode];
+              hasAuthenticated = !!(deviceInfo?.verified && (deviceInfo.figmaToken || this.figmaToken));
             }
 
-            console.error(`[OAuth Token PID:${process.pid}] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Total codes: ${Object.keys(this.deviceCodes).length}, All codes: ${Object.keys(this.deviceCodes).join(', ')}`);
-            if (!deviceInfo) {
+            console.error(`[OAuth Token PID:${process.pid}] Device: ${deviceCode}, sessionToken: ${!!sessionToken}, deviceInfo: ${!!deviceInfo}, authenticated: ${hasAuthenticated}`);
+
+            if (hasAuthenticated) {
+              // User has authenticated - return success
+              res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+              res.end(JSON.stringify({
+                access_token: deviceCode,
+                token_type: "Bearer",
+                expires_in: 3600,
+              }));
+              return;
+            }
+
+            // Check if device code exists at all
+            const deviceExists = this.deviceCodes[deviceCode] || sessionToken;
+            if (!deviceExists) {
               res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
               res.end(JSON.stringify({
                 error: "invalid_grant",
@@ -717,42 +728,12 @@ class FigmaSmartImageServer {
               return;
             }
 
-            // Check if expired (10 minutes)
-            if (Date.now() - deviceInfo.createdAt > 600000) {
-              delete this.deviceCodes[deviceCode];
-              res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
-              res.end(JSON.stringify({
-                error: "expired_token",
-                error_description: "Device code has expired",
-              }));
-              return;
-            }
-
-            // Check if user has authenticated (device-specific token or global token)
-            const hasToken = deviceInfo.figmaToken || this.figmaToken;
-            if (hasToken && deviceInfo.verified) {
-              // User has entered their Figma token
-              // Store the token in sessionTokens for this session using the device code as key
-              if (deviceInfo.figmaToken) {
-                this.sessionTokens.set(deviceCode, {
-                  token: deviceInfo.figmaToken,
-                  createdAt: Date.now(),
-                });
-              }
-              res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
-              res.end(JSON.stringify({
-                access_token: deviceCode,
-                token_type: "Bearer",
-                expires_in: 3600,
-              }));
-            } else {
-              // Still waiting for user to authenticate
-              res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
-              res.end(JSON.stringify({
-                error: "authorization_pending",
-                error_description: "Please visit " + (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`) + "/ to authenticate with your Figma token",
-              }));
-            }
+            // Still waiting for user to authenticate
+            res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+            res.end(JSON.stringify({
+              error: "authorization_pending",
+              error_description: "Please visit " + (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`) + "/ to authenticate with your Figma token",
+            }));
             return;
           }
 
@@ -886,13 +867,20 @@ class FigmaSmartImageServer {
 
                 console.error(`[Auth] Found device code: ${foundDeviceCode}`);
                 if (foundDeviceCode && token) {
-                  // Store the Figma token with this device code
+                  // WORKAROUND: Store token directly in sessionTokens using deviceCode as key
+                  // This bypasses the deviceCodes Map/Object corruption issue
+                  this.sessionTokens.set(foundDeviceCode, {
+                    token,
+                    createdAt: Date.now(),
+                  });
+                  // Also update deviceCodes for potential future use
                   const deviceInfo = this.deviceCodes[foundDeviceCode];
                   if (deviceInfo) {
                     deviceInfo.figmaToken = token;
                     deviceInfo.verified = true;
                     console.error(`[Auth PID:${process.pid}] Updated device code ${foundDeviceCode} with token and verified=true`);
                   }
+                  console.error(`[Auth PID:${process.pid}] Also stored token in sessionTokens with key: ${foundDeviceCode}`);
                   res.writeHead(200, { "Content-Type": "application/json" });
                   res.end(JSON.stringify({ success: true, authenticated: true }));
                 } else if (foundDeviceCode) {
