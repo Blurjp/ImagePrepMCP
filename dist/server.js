@@ -584,6 +584,7 @@ class FigmaSmartImageServer {
                             return;
                         }
                         const deviceInfo = this.deviceCodes.get(deviceCode);
+                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, All codes: ${Array.from(this.deviceCodes.keys()).join(', ')}`);
                         if (!deviceInfo) {
                             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                             res.end(JSON.stringify({
@@ -737,6 +738,7 @@ class FigmaSmartImageServer {
                             if (userCode) {
                                 // Multi-tenant mode via OAuth device code flow
                                 // Find the device code by user code
+                                console.error(`[Auth] Looking for user code: ${userCode}, All codes: ${Array.from(this.deviceCodes.entries()).map(([k, v]) => `${k}:${v.userCode}`).join(', ')}`);
                                 let foundDeviceCode = null;
                                 for (const [deviceCode, deviceInfo] of this.deviceCodes.entries()) {
                                     if (deviceInfo.userCode === userCode) {
@@ -744,12 +746,14 @@ class FigmaSmartImageServer {
                                         break;
                                     }
                                 }
+                                console.error(`[Auth] Found device code: ${foundDeviceCode}`);
                                 if (foundDeviceCode && token) {
                                     // Store the Figma token with this device code
                                     const deviceInfo = this.deviceCodes.get(foundDeviceCode);
                                     if (deviceInfo) {
                                         deviceInfo.figmaToken = token;
                                         deviceInfo.verified = true;
+                                        console.error(`[Auth] Updated device code ${foundDeviceCode} with token and verified=true`);
                                     }
                                     res.writeHead(200, { "Content-Type": "application/json" });
                                     res.end(JSON.stringify({ success: true, authenticated: true }));
