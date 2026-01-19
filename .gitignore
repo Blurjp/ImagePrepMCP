@@ -1,9 +1,0 @@
-# Keep source files for Railway deployment
-!figma-smart-image-mcp/src/
-!figma-smart-image-mcp/dist/
-
-# Standard excludes
-node_modules/
-.env
-.DS_Store
-*.log
