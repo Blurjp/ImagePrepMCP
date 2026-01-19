@@ -1,0 +1,9 @@
+{
+  "name": "ImagePrepMCP",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd figma-smart-image-mcp && npm run build",
+    "start": "cd figma-smart-image-mcp && node dist/server.js --transport http --port $PORT"
+  }
+}
