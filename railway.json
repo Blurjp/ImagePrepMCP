@@ -1,10 +1,12 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
+  "rootDirectory": "figma-smart-image-mcp",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "NIXPACKS",
+    "buildCommand": "npm install && npm run build"
   },
   "deploy": {
-    "startCommand": "cd figma-smart-image-mcp && node dist/server.js --transport http --port $PORT",
+    "startCommand": "node dist/server.js --transport http --port $PORT",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",
