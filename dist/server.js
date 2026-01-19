@@ -583,17 +583,21 @@ class FigmaSmartImageServer {
                             }));
                             return;
                         }
-                        const deviceInfo = this.deviceCodes.get(deviceCode);
-                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Map size: ${this.deviceCodes.size}, All codes: ${Array.from(this.deviceCodes.keys()).join(', ')}`);
+                        // WORKAROUND: Direct .get() sometimes fails, so iterate to find
+                        let deviceInfo = this.deviceCodes.get(deviceCode);
                         if (!deviceInfo) {
-                            // Try to find by user code for debugging
-                            let foundByUserCode = null;
+                            console.error(`[OAuth Token] Direct .get() failed, iterating to find device code: ${deviceCode}`);
+                            // Fallback: iterate through all entries to find the device code
                             for (const [dc, di] of this.deviceCodes.entries()) {
-                                if (di.userCode === deviceCode) { // This shouldn't match but checking anyway
-                                    foundByUserCode = dc;
+                                if (dc === deviceCode) {
+                                    deviceInfo = di;
+                                    console.error(`[OAuth Token] Found device code via iteration: ${dc}`);
+                                    break;
                                 }
                             }
-                            console.error(`[OAuth Token] Device code not found. Searched by user_code (shouldn't match): ${foundByUserCode}`);
+                        }
+                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Map size: ${this.deviceCodes.size}, All codes: ${Array.from(this.deviceCodes.keys()).join(', ')}`);
+                        if (!deviceInfo) {
                             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                             res.end(JSON.stringify({
                                 error: "invalid_grant",
