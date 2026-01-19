@@ -577,9 +577,12 @@ class FigmaSmartImageServer {
                 let body = "";
                 req.on("data", (chunk) => { body += chunk.toString(); });
                 req.on("end", async () => {
+                    console.error(`[OAuth Token] Raw body: ${body}`);
                     const params = new URLSearchParams(body);
+                    console.error(`[OAuth Token] URLSearchParams keys:`, Array.from(params.keys()));
                     const grantType = params.get("grant_type");
                     const deviceCode = params.get("device_code");
+                    console.error(`[OAuth Token] Parsed device_code: ${deviceCode}, grant_type: ${grantType}`);
                     // Device code flow polling
                     if (grantType === "urn:ietf:params:oauth:grant-type:device_code") {
                         if (!deviceCode) {
@@ -599,6 +602,7 @@ class FigmaSmartImageServer {
                         if (!hasAuthenticated) {
                             deviceInfo = await deviceCodesStorage.get(deviceCode);
                             console.error(`[OAuth Token] DEVICE_GET_RESULT: ${deviceInfo ? "FOUND" : "NOT_FOUND"}`);
+                            console.error(`[OAuth Token] deviceInfo.verified: ${deviceInfo?.verified}, has figmaToken: ${!!deviceInfo?.figmaToken}, global figmaToken: ${!!this.figmaToken}`);
                             hasAuthenticated = deviceInfo?.verified && (deviceInfo?.figmaToken || this.figmaToken);
                         }
                         console.error(`[OAuth Token] AUTHENTICATED: ${hasAuthenticated ? "YES" : "NO"}`);
@@ -762,11 +766,15 @@ class FigmaSmartImageServer {
                                     });
                                     // Also update deviceCodes in Redis
                                     const deviceInfo = await deviceCodesStorage.get(foundDeviceCode);
+                                    console.error(`[Auth] Before update - deviceInfo.verified: ${deviceInfo?.verified}, has figmaToken: ${!!deviceInfo?.figmaToken}`);
                                     if (deviceInfo) {
                                         deviceInfo.figmaToken = token;
                                         deviceInfo.verified = true;
                                         await deviceCodesStorage.set(foundDeviceCode, deviceInfo);
                                         console.error(`[Auth PID:${process.pid}] Updated device code ${foundDeviceCode} with token and verified=true`);
+                                        // Verify it was stored correctly
+                                        const verifyInfo = await deviceCodesStorage.get(foundDeviceCode);
+                                        console.error(`[Auth] After update - deviceInfo.verified: ${verifyInfo?.verified}, has figmaToken: ${!!verifyInfo?.figmaToken}`);
                                     }
                                     console.error(`[Auth PID:${process.pid}] Stored token in sessionTokens with key: ${foundDeviceCode}`);
                                     res.writeHead(200, { "Content-Type": "application/json" });
