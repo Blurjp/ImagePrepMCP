@@ -39,39 +39,21 @@ Get your Figma token from: https://www.figma.com/settings
 
 Deploy this as a hosted service that everyone can use:
 
-### 1. Push to GitHub
+### Live Deployment
+
+The service is deployed at: **https://figma-smart-image-mcp-production.up.railway.app**
+
+### Add to Claude (for users)
 
 ```bash
-git add .
-git commit -m "Add Railway deployment support"
-git push
+claude mcp add --transport http figma-smart-image https://figma-smart-image-mcp-production.up.railway.app/mcp
 ```
 
-### 2. Deploy on Railway
-
-1. Go to [railway.app](https://railway.app)
-2. Click "New Project" → "Deploy from GitHub repo"
-3. Select this repository
-4. Railway will automatically detect the Node.js project and deploy
-
-### 3. Get Your Service URL
-
-After deployment, Railway will provide a URL like:
-```
-https://figma-smart-image.up.railway.app
-```
-
-### 4. Add to Claude (for users)
-
-```bash
-claude mcp add --transport http figma-smart-image https://figma-smart-image.up.railway.app/mcp
-```
-
-### 5. Users Authenticate Themselves
+### Users Authenticate Themselves
 
 Each user visits the service URL to add their own Figma token:
 ```
-https://figma-smart-image.up.railway.app/
+https://figma-smart-image-mcp-production.up.railway.app/
 ```
 
 **Security**: Each user's Figma token is stored in-memory for their session only. Tokens are never persisted to disk and are automatically cleaned up after 1 hour.
@@ -79,9 +61,8 @@ https://figma-smart-image.up.railway.app/
 ### Railway Configuration
 
 The project includes:
-- `railway.json` - Deployment configuration
-- `Procfile` - Process management
-- `.railwayignore` - Files to exclude from deployment
+- `Dockerfile` - Container build configuration
+- `package.json` - Dependencies and scripts
 
 **Environment Variables** (optional on Railway):
 - None required - the service works out of the box
