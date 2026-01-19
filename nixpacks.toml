@@ -1,0 +1,5 @@
+[phases.build]
+cmds = ["cd figma-smart-image-mcp && npm install", "cd figma-smart-image-mcp && npm run build"]
+
+[start]
+cmd = "cd figma-smart-image-mcp && node dist/server.js --transport http --port $PORT"
