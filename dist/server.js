@@ -551,12 +551,15 @@ class FigmaSmartImageServer {
             }
             // OAuth device authorization endpoint - returns info about web auth
             if (url.pathname === "/oauth/device_authorization" && req.method === "POST") {
+                const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+                    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+                    : `http://localhost:${port}`;
                 res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
                 res.end(JSON.stringify({
                     device_code: "web_auth",
                     user_code: "WEB",
-                    verification_uri: `http://localhost:${port}/`,
-                    verification_uri_complete: `http://localhost:${port}/`,
+                    verification_uri: `${baseUrl}/`,
+                    verification_uri_complete: `${baseUrl}/`,
                     expires_in: 300,
                     interval: 5,
                 }));
@@ -655,12 +658,16 @@ class FigmaSmartImageServer {
                             createdAt: Date.now(),
                             verified: !!this.figmaToken, // Auto-verify if token already exists
                         });
+                        // Use Railway domain if available, otherwise localhost
+                        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+                            ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+                            : `http://localhost:${port}`;
                         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
                         res.end(JSON.stringify({
                             device_code: deviceCode,
                             user_code: userCode,
-                            verification_uri: `http://localhost:${port}/`,
-                            verification_uri_complete: `http://localhost:${port}/`,
+                            verification_uri: `${baseUrl}/`,
+                            verification_uri_complete: `${baseUrl}/`,
                             expires_in: 600,
                             interval: 2,
                         }));
