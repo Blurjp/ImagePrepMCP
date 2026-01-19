@@ -584,8 +584,16 @@ class FigmaSmartImageServer {
                             return;
                         }
                         const deviceInfo = this.deviceCodes.get(deviceCode);
-                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, All codes: ${Array.from(this.deviceCodes.keys()).join(', ')}`);
+                        console.error(`[OAuth Token] Looking for device code: ${deviceCode}, Found: ${!!deviceInfo}, Map size: ${this.deviceCodes.size}, All codes: ${Array.from(this.deviceCodes.keys()).join(', ')}`);
                         if (!deviceInfo) {
+                            // Try to find by user code for debugging
+                            let foundByUserCode = null;
+                            for (const [dc, di] of this.deviceCodes.entries()) {
+                                if (di.userCode === deviceCode) { // This shouldn't match but checking anyway
+                                    foundByUserCode = dc;
+                                }
+                            }
+                            console.error(`[OAuth Token] Device code not found. Searched by user_code (shouldn't match): ${foundByUserCode}`);
                             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                             res.end(JSON.stringify({
                                 error: "invalid_grant",
@@ -659,6 +667,7 @@ class FigmaSmartImageServer {
                             createdAt: Date.now(),
                             verified: !!this.figmaToken, // Auto-verify if token already exists
                         });
+                        console.error(`[Device Authorize] Created device code: ${deviceCode}, user_code: ${userCode}, Map size now: ${this.deviceCodes.size}`);
                         // Use Railway domain if available, otherwise localhost
                         const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
                             ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
