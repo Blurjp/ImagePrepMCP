@@ -179,7 +179,8 @@ class FigmaSmartImageServer {
   private server: Server;
   private figmaToken: string;  // Default token (from env/file for local dev)
   private transportMode: TransportMode;
-  private deviceCodes: Map<string, { userCode: string; clientId: string; createdAt: number; verified: boolean }>;
+  // Device codes for OAuth flow - store token when user authenticates via web UI
+  private deviceCodes: Map<string, { userCode: string; clientId: string; createdAt: number; verified: boolean; figmaToken?: string }>;
   // Multi-tenant: Store tokens per session for hosted deployments
   private sessionTokens: Map<string, { token: string; createdAt: number }>;
   private sessionTransports: Map<string, any>;  // Track transports per session
@@ -216,11 +217,17 @@ class FigmaSmartImageServer {
   /**
    * Get token for a specific session
    * Returns session token if available, otherwise falls back to global token
+   * Also checks if this sessionId matches any device code (for OAuth flow)
    */
   private getTokenForSession(sessionId: string): string {
     const sessionData = this.sessionTokens.get(sessionId);
     if (sessionData && sessionData.token) {
       return sessionData.token;
+    }
+    // Check if sessionId is a device code (for OAuth flow)
+    const deviceData = this.deviceCodes.get(sessionId);
+    if (deviceData?.figmaToken) {
+      return deviceData.figmaToken;
     }
     return this.figmaToken;
   }
@@ -694,12 +701,20 @@ class FigmaSmartImageServer {
               return;
             }
 
-            // Check if user has authenticated
-            if (this.figmaToken && deviceInfo.verified) {
+            // Check if user has authenticated (device-specific token or global token)
+            const hasToken = deviceInfo.figmaToken || this.figmaToken;
+            if (hasToken && deviceInfo.verified) {
               // User has entered their Figma token
+              // Store the token in sessionTokens for this session using the device code as key
+              if (deviceInfo.figmaToken) {
+                this.sessionTokens.set(deviceCode, {
+                  token: deviceInfo.figmaToken,
+                  createdAt: Date.now(),
+                });
+              }
               res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
               res.end(JSON.stringify({
-                access_token: "figma_auth_ok",
+                access_token: deviceCode,
                 token_type: "Bearer",
                 expires_in: 3600,
               }));
@@ -708,7 +723,7 @@ class FigmaSmartImageServer {
               res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
               res.end(JSON.stringify({
                 error: "authorization_pending",
-                error_description: "Please visit http://localhost:" + port + "/ to authenticate with your Figma token",
+                error_description: "Please visit " + (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`) + "/ to authenticate with your Figma token",
               }));
             }
             return;
@@ -822,8 +837,36 @@ class FigmaSmartImageServer {
               const params = new URLSearchParams(body);
               const token = params.get("token") || "";
               const sessionId = params.get("session_id") || "";
+              const userCode = params.get("user_code")?.toUpperCase() || "";
 
-              if (sessionId) {
+              if (userCode) {
+                // Multi-tenant mode via OAuth device code flow
+                // Find the device code by user code
+                let foundDeviceCode = null;
+                for (const [deviceCode, deviceInfo] of this.deviceCodes.entries()) {
+                  if (deviceInfo.userCode === userCode) {
+                    foundDeviceCode = deviceCode;
+                    break;
+                  }
+                }
+
+                if (foundDeviceCode && token) {
+                  // Store the Figma token with this device code
+                  const deviceInfo = this.deviceCodes.get(foundDeviceCode);
+                  if (deviceInfo) {
+                    deviceInfo.figmaToken = token;
+                    deviceInfo.verified = true;
+                  }
+                  res.writeHead(200, { "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ success: true, authenticated: true }));
+                } else if (foundDeviceCode) {
+                  res.writeHead(200, { "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ success: true, authenticated: true }));
+                } else {
+                  res.writeHead(400, { "Content-Type": "application/json" });
+                  res.end(JSON.stringify({ error: "Invalid or expired user code" }));
+                }
+              } else if (sessionId) {
                 // Multi-tenant mode: store token for this session
                 if (token) {
                   this.sessionTokens.set(sessionId, {
@@ -831,16 +874,17 @@ class FigmaSmartImageServer {
                     createdAt: Date.now(),
                   });
                 }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: true, authenticated: true, sessionId }));
               } else {
                 // Single-tenant mode: store global token (for local dev)
                 this.figmaToken = token;
                 if (token) {
                   saveTokenToFile(token);
                 }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: true, authenticated: true }));
               }
-
-              res.writeHead(200, { "Content-Type": "application/json" });
-              res.end(JSON.stringify({ success: true, authenticated: true, sessionId }));
             } catch (error) {
               res.writeHead(400, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ error: "Invalid request" }));
@@ -915,11 +959,19 @@ class FigmaSmartImageServer {
           try {
             let parsedBody = JSON.parse(body);
 
+            // Check for Authorization header (contains device code from OAuth flow)
+            const authHeader = req.headers.authorization;
+            let authSessionId = sessionId;
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+              // Extract device code from Bearer token (this is the access_token from OAuth)
+              authSessionId = authHeader.substring(7);
+            }
+
             // Inject session ID into request metadata for multi-tenant token support
             if (parsedBody.params && typeof parsedBody.params === 'object') {
               parsedBody.params._meta = {
                 ...parsedBody.params._meta,
-                sessionId: sessionId,
+                sessionId: authSessionId,  // Use auth session ID (device code) if available
               };
             }
 
@@ -1030,7 +1082,8 @@ class FigmaSmartImageServer {
       font-weight: 500;
       margin-bottom: 8px;
     }
-    input[type="password"] {
+    input[type="password"],
+    input[type="text"] {
       width: 100%;
       padding: 12px 16px;
       border: 2px solid #3a3a5c;
@@ -1146,11 +1199,19 @@ class FigmaSmartImageServer {
     ${!hasToken ? `
     <form id="authForm">
       <div class="form-group">
+        <label for="userCode">User Code (from Claude)</label>
+        <input type="text" id="userCode" name="userCode" placeholder="ABC123" autocomplete="off">
+        <p class="help-text">
+          Enter the user code displayed by Claude when connecting to this MCP server.
+          Leave empty for local development (single-tenant mode).
+        </p>
+      </div>
+      <div class="form-group">
         <label for="token">Figma Personal Access Token</label>
         <input type="password" id="token" name="token" required placeholder="figd_..." autocomplete="off">
         <p class="help-text">
           Get your token from <a href="https://www.figma.com/settings" target="_blank">Figma Settings</a>.
-          Create a personal access token with file read access. Token will be saved locally for convenience.
+          Create a personal access token with file read access.
         </p>
       </div>
       <button type="submit">Connect to Figma</button>
@@ -1193,14 +1254,21 @@ class FigmaSmartImageServer {
     document.getElementById('authForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const token = document.getElementById('token').value;
+      const userCode = document.getElementById('userCode').value.trim().toUpperCase();
       const successDiv = document.getElementById('success');
       const errorDiv = document.getElementById('error');
 
       try {
+        // Build request body with user_code if provided
+        const body = new URLSearchParams({
+          token: token,
+          ...(userCode && { user_code: userCode })
+        });
+
         const response = await fetch('/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: 'token=' + encodeURIComponent(token)
+          body: body.toString()
         });
 
         if (response.ok) {
@@ -1209,7 +1277,8 @@ class FigmaSmartImageServer {
           document.getElementById('authForm').style.display = 'none';
           document.querySelector('.status').innerHTML = '<div class="status-dot" style="background: #4ade80"></div><span>Connected to Figma</span>';
         } else {
-          throw new Error('Failed to save token');
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to save token');
         }
       } catch (err) {
         errorDiv.textContent = 'Error: ' + err.message;
