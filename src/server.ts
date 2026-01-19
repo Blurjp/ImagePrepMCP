@@ -1208,11 +1208,79 @@ class FigmaSmartImageServer {
       color: #4ade80;
       font-family: monospace;
     }
+    .how-to-use {
+      background: #1a1a2e;
+      border-radius: 12px;
+      padding: 24px;
+      margin-top: 32px;
+      margin-bottom: 32px;
+    }
+    .how-to-use h2 {
+      color: #fff;
+      font-size: 18px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .step {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .step-number {
+      width: 24px;
+      height: 24px;
+      background: linear-gradient(135deg, #f24e1e 0%, #ff7262 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .step-content {
+      flex: 1;
+    }
+    .step-title {
+      color: #e0e0e8;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .step-desc {
+      color: #a0a0b8;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .step-code {
+      background: #0d0d1a;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      color: #4ade80;
+      overflow-x: auto;
+    }
+    .multi-tenant-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+      color: #000;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1><div class="icon">F</div>Figma Smart Image MCP</h1>
+    <h1><div class="icon">F</div>Figma Smart Image MCP <span class="multi-tenant-badge">Multi-Tenant</span></h1>
     <p class="subtitle">Process Figma designs into Claude-readable images with automatic tiling and optimization.</p>
 
     <div class="status">
@@ -1223,10 +1291,10 @@ class FigmaSmartImageServer {
     ${!hasToken ? `
     <form id="authForm">
       <div class="form-group">
-        <label for="userCode">User Code (from Claude)</label>
+        <label for="userCode">User Code</label>
         <input type="text" id="userCode" name="userCode" placeholder="ABC123" autocomplete="off">
         <p class="help-text">
-          Enter the user code displayed by Claude when connecting to this MCP server.
+          Enter the user code from the OAuth device authorization flow.
           Leave empty for local development (single-tenant mode).
         </p>
       </div>
@@ -1244,6 +1312,53 @@ class FigmaSmartImageServer {
     <div id="success" class="success">✓ Connected! You can now use this MCP server.</div>
     <div id="error" class="error"></div>
     ` : ''}
+
+    <div class="how-to-use">
+      <h2>🚀 How to Use This MCP Server</h2>
+
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <div class="step-title">Create .clauderc File</div>
+          <div class="step-desc">Create or update .clauderc in your project directory with the following configuration:</div>
+          <div class="step-code">{
+  "mcpServers": {
+    "figma-smart-image": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sse",
+               "https://figma-smart-image-mcp-production.up.railway.app/mcp"]
+    }
+  }
+}</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <div class="step-title">Get Device Code</div>
+          <div class="step-desc">When you first use the MCP server, you'll receive a device code and user code through the OAuth flow.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <div class="step-title">Authenticate with Figma</div>
+          <div class="step-desc">Enter your user code and Figma token on this page to authenticate. Your token is stored securely in Redis and isolated from other users.</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <div class="step-title">Start Using in Claude</div>
+          <div class="step-desc">Ask Claude to process Figma designs:</div>
+          <div class="step-code">"Please extract the hero section from this Figma link:
+https://www.figma.com/design/abc123/..."</div>
+        </div>
+      </div>
+    </div>
 
     <div class="features">
       <div class="feature">
@@ -1269,7 +1384,7 @@ class FigmaSmartImageServer {
     </div>
 
     <div class="footer">
-      Add via: <code>claude mcp add --transport http figma-smart-image http://127.0.0.1:${port}/mcp</code>
+      Railway Deployment: <code>https://figma-smart-image-mcp-production.up.railway.app/</code>
     </div>
   </div>
 
