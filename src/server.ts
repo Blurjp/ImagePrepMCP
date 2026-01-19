@@ -694,8 +694,7 @@ class FigmaSmartImageServer {
 
             // Check sessionTokens first (more reliable than deviceCodes)
             const sessionToken = await sessionTokensStorage.get(deviceCode);
-            const hasSessionToken = sessionToken ? "YES" : "NO";
-            console.error(`[OAuth Token] sessionTokensStorage.get(${deviceCode}): ${hasSessionToken}`);
+            console.error(`[OAuth Token] SESSION_GET_RESULT: ${sessionToken ? "FOUND" : "NOT_FOUND"}`);
 
             let hasAuthenticated = !!sessionToken;
 
@@ -703,12 +702,11 @@ class FigmaSmartImageServer {
             let deviceInfo = null;
             if (!hasAuthenticated) {
               deviceInfo = await deviceCodesStorage.get(deviceCode);
-              const hasDeviceInfo = deviceInfo ? "YES" : "NO";
-              console.error(`[OAuth Token] deviceCodesStorage.get(${deviceCode}): ${hasDeviceInfo}`);
+              console.error(`[OAuth Token] DEVICE_GET_RESULT: ${deviceInfo ? "FOUND" : "NOT_FOUND"}`);
               hasAuthenticated = deviceInfo?.verified && (deviceInfo?.figmaToken || this.figmaToken);
             }
 
-            console.error(`[OAuth Token] Device: ${deviceCode}, sessionToken: ${!!sessionToken}, deviceInfo: ${!!deviceInfo}, authenticated: ${hasAuthenticated}`);
+            console.error(`[OAuth Token] AUTHENTICATED: ${hasAuthenticated ? "YES" : "NO"}`);
 
             if (hasAuthenticated) {
               // User has authenticated - return success
