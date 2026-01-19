@@ -61,9 +61,7 @@ export const deviceCodesStorage = {
     const redis = getRedisClient();
     if (redis) {
       const data = await redis.get(`device:${key}`);
-      const result = data ? JSON.parse(data) : null;
-      console.error(`[deviceCodesStorage.get] key=${key}, found=${!!result}`);
-      return result;
+      return data ? JSON.parse(data) : null;
     }
     return inMemoryDeviceCodes.get(key);
   },
@@ -124,9 +122,7 @@ export const sessionTokensStorage = {
     const redis = getRedisClient();
     if (redis) {
       const data = await redis.get(`session:${key}`);
-      const result = data ? JSON.parse(data) : null;
-      console.error(`[sessionTokensStorage.get] key=${key}, found=${!!result}`);
-      return result;
+      return data ? JSON.parse(data) : null;
     }
     return inMemorySessionTokens.get(key);
   },
