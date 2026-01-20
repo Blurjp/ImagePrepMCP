@@ -182,12 +182,14 @@ class FigmaSmartImageServer {
   private transportMode: TransportMode;
   private sessionTransports: Map<string, any>;  // Track transports per session (in-memory, per-instance)
   private rateLimiter: RateLimiter;
+  private oauthStates: Map<string, { codeVerifier: string; redirectUri: string; createdAt: number }>;  // OAuth state management
 
   constructor(transportMode: TransportMode = "stdio") {
     this.transportMode = transportMode;
     // Load token from: 1) Environment variable, 2) File, 3) Empty
     this.figmaToken = process.env.FIGMA_TOKEN || loadTokenFromFile() || "";
     this.sessionTransports = new Map();
+    this.oauthStates = new Map();
     // Rate limiting: 100 requests per minute per IP
     this.rateLimiter = new RateLimiter(100, 60000);
 
@@ -822,7 +824,109 @@ class FigmaSmartImageServer {
       // Authentication page
       if (url.pathname === "/") {
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(this.getAuthPage());
+        const hasOAuth = !!(process.env.FIGMA_CLIENT_ID);
+        res.end(this.getAuthPage(hasOAuth));
+        return;
+      }
+
+      // OAuth authorize endpoint - Start OAuth flow
+      if (url.pathname === "/oauth/authorize" && req.method === "GET") {
+        const clientId = process.env.FIGMA_CLIENT_ID;
+        if (!clientId) {
+          res.writeHead(500, { "Content-Type": "text/html" });
+          res.end("<html><body><h1>OAuth Not Configured</h1><p>FIGMA_CLIENT_ID environment variable is not set.</p></body></html>");
+          return;
+        }
+
+        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+          : `http://localhost:${HTTP_PORT}`;
+
+        const redirectUri = `${baseUrl}/oauth/callback`;
+        const codeVerifier = this.generateCodeVerifier();
+        const state = this.generateState();
+
+        // Store state and code verifier for callback verification
+        this.oauthStates.set(state, {
+          codeVerifier,
+          redirectUri,
+          createdAt: Date.now(),
+        });
+
+        // Generate code challenge
+        this.generateCodeChallenge(codeVerifier).then((codeChallenge) => {
+          // Redirect to Figma's OAuth authorize endpoint
+          const figmaAuthUrl = new URL("https://www.figma.com/oauth");
+          figmaAuthUrl.searchParams.set("client_id", clientId);
+          figmaAuthUrl.searchParams.set("redirect_uri", redirectUri);
+          figmaAuthUrl.searchParams.set("scope", "file_read");
+          figmaAuthUrl.searchParams.set("state", state);
+          figmaAuthUrl.searchParams.set("response_type", "code");
+          figmaAuthUrl.searchParams.set("code_challenge", codeChallenge);
+          figmaAuthUrl.searchParams.set("code_challenge_method", "S256");
+
+          res.writeHead(302, { Location: figmaAuthUrl.toString() });
+          res.end();
+        });
+        return;
+      }
+
+      // OAuth callback endpoint - Handle Figma's redirect
+      if (url.pathname === "/oauth/callback" && req.method === "GET") {
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        const error = url.searchParams.get("error");
+
+        if (error) {
+          res.writeHead(302, { Location: `/?error=${encodeURIComponent(error)}` });
+          res.end();
+          return;
+        }
+
+        if (!code || !state) {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end("<html><body><h1>Invalid callback</h1><p>Missing code or state parameter.</p></body></html>");
+          return;
+        }
+
+        // Verify state and get code verifier
+        const oauthState = this.oauthStates.get(state);
+        if (!oauthState) {
+          res.writeHead(400, { "Content-Type": "text/html" });
+          res.end("<html><body><h1>Invalid state</h1><p>OAuth state expired or invalid.</p></body></html>");
+          return;
+        }
+
+        // Clean up state
+        this.oauthStates.delete(state);
+
+        try {
+          // Exchange code for access token
+          const tokenResponse = await this.exchangeCodeForToken(
+            code,
+            oauthState.codeVerifier,
+            oauthState.redirectUri
+          );
+
+          // Store token in Redis with refresh capability
+          const sessionData = {
+            token: tokenResponse.access_token,
+            refreshToken: tokenResponse.refresh_token || "",
+            expiresAt: Date.now() + (tokenResponse.expires_in * 1000),
+            createdAt: Date.now(),
+          };
+
+          await sessionTokensStorage.set(state, sessionData);
+
+          // Redirect back to auth page with success
+          res.writeHead(302, { Location: `/?oauth=success&session=${state}` });
+          res.end();
+        } catch (error) {
+          console.error("[OAuth Callback] Error:", error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          res.writeHead(302, { Location: `/?error=${encodeURIComponent(errorMessage)}` });
+          res.end();
+        }
         return;
       }
 
@@ -1024,7 +1128,116 @@ class FigmaSmartImageServer {
     });
   }
 
-  private getAuthPage(): string {
+  // OAuth Helper Functions
+  private generateCodeVerifier(): string {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return this.base64URLEncode(array);
+  }
+
+  private base64URLEncode(buffer: Uint8Array): string {
+    let str = '';
+    for (const byte of buffer) {
+      str += String.fromCharCode(byte);
+    }
+    return btoa(str)
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  }
+
+  private async generateCodeChallenge(verifier: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return this.base64URLEncode(new Uint8Array(hash));
+  }
+
+  private generateState(): string {
+    const array = new Uint8Array(16);
+    crypto.getRandomValues(array);
+    return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private async exchangeCodeForToken(code: string, codeVerifier: string, redirectUri: string): Promise<{
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  }> {
+    const clientId = process.env.FIGMA_CLIENT_ID;
+    const clientSecret = process.env.FIGMA_CLIENT_SECRET;
+
+    if (!clientId) {
+      throw new Error('FIGMA_CLIENT_ID not configured');
+    }
+
+    const response = await fetch('https://www.figma.com/api/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: code,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code_verifier: codeVerifier,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Token exchange failed: ${error}`);
+    }
+
+    const tokenData = await response.json() as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in: number;
+    };
+    return tokenData;
+  }
+
+  private async refreshAccessToken(refreshToken: string): Promise<{
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  }> {
+    const clientId = process.env.FIGMA_CLIENT_ID;
+    const clientSecret = process.env.FIGMA_CLIENT_SECRET;
+
+    if (!clientId) {
+      throw new Error('FIGMA_CLIENT_ID not configured');
+    }
+
+    const response = await fetch('https://www.figma.com/api/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Token refresh failed: ${error}`);
+    }
+
+    const tokenData = await response.json() as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in: number;
+    };
+    return tokenData;
+  }
+
+  private getAuthPage(hasOAuth: boolean = false): string {
     const port = HTTP_PORT;
     const hasToken = !!this.figmaToken;
 
@@ -1276,6 +1489,48 @@ class FigmaSmartImageServer {
       border-radius: 4px;
       margin-left: 8px;
     }
+    .oauth-button {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #2d2d4a 100%);
+      border: 2px solid #f24e1e;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .oauth-button:hover {
+      background: linear-gradient(135deg, #2d2d4a 0%, #3a3a5c 100%);
+      border-color: #ff7262;
+    }
+    .oauth-button svg {
+      width: 20px;
+      height: 20px;
+    }
+    .divider {
+      display: flex;
+      align-items: center;
+      text-align: center;
+      margin: 24px 0;
+    }
+    .divider::before,
+    .divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid #3a3a5c;
+    }
+    .divider span {
+      padding: 0 16px;
+      color: #707090;
+      font-size: 13px;
+    }
   </style>
 </head>
 <body>
@@ -1289,6 +1544,19 @@ class FigmaSmartImageServer {
     </div>
 
     ${!hasToken ? `
+    ${hasOAuth ? `
+    <a href="/oauth/authorize" class="oauth-button">
+      <svg viewBox="0 0 38 57" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M19 28.5C29.4934 28.5 38 22.1274 38 14.25C38 6.37258 29.4934 0 19 0C8.50659 0 0 6.37258 0 14.25C0 22.1274 8.50659 28.5 19 28.5Z" fill="#F24E1E"/>
+        <path d="M19 38.275C30.1503 38.275 39.375 33.5772 39.375 27.1375C39.375 20.6978 30.1503 15.1375 19 15.1375C7.84974 15.1375 -1.375 20.6978 -1.375 27.1375C-1.375 33.5772 7.84974 38.275 19 38.275Z" fill="#A259FF"/>
+        <path d="M19 50.3125C27.4264 50.3125 34.5625 46.8303 34.5625 41.9375C34.5625 37.0447 27.4264 32.6875 19 32.6875C10.5736 32.6875 3.4375 37.0447 3.4375 41.9375C3.4375 46.8303 10.5736 50.3125 19 50.3125Z" fill="#1ABCFE"/>
+        <path d="M8.3125 14.25C8.3125 17.6901 12.9237 20.6125 19 20.6125C25.0763 20.6125 29.6875 17.6901 29.6875 14.25C29.6875 10.8099 25.0763 8.3125 19 8.3125C12.9237 8.3125 8.3125 10.8099 8.3125 14.25Z" fill="#FF7262"/>
+        <path d="M8.3125 27.1375C8.3125 30.5776 12.9237 33.5 19 33.5C25.0763 33.5 29.6875 30.5776 29.6875 27.1375C29.6875 23.6974 25.0763 21.2 19 21.2C12.9237 21.2 8.3125 23.6974 8.3125 27.1375Z" fill="#A259FF"/>
+      </svg>
+      Authorize with Figma
+    </a>
+    <div class="divider"><span>or enter token manually</span></div>
+    ` : ''}
     <form id="authForm">
       <div class="form-group">
         <label for="userCode">User Code</label>
@@ -1389,6 +1657,42 @@ https://www.figma.com/design/abc123/..."</div>
   </div>
 
   <script>
+    // Check for OAuth callback parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    const oauthSuccess = urlParams.get('oauth');
+    const oauthError = urlParams.get('error');
+    const oauthSession = urlParams.get('session');
+
+    if (oauthSuccess === 'success' && oauthSession) {
+      // OAuth was successful
+      const successDiv = document.getElementById('success');
+      const errorDiv = document.getElementById('error');
+      const authForm = document.getElementById('authForm');
+      const statusDiv = document.querySelector('.status');
+
+      if (successDiv) successDiv.style.display = 'block';
+      if (errorDiv) errorDiv.style.display = 'none';
+      if (authForm) authForm.style.display = 'none';
+      if (statusDiv) {
+        statusDiv.innerHTML = '<div class="status-dot" style="background: #4ade80"></div><span>Connected to Figma via OAuth</span>';
+        statusDiv.style.background = '#2d6a4f';
+      }
+
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (oauthError) {
+      // OAuth failed
+      const errorDiv = document.getElementById('error');
+      if (errorDiv) {
+        errorDiv.textContent = 'OAuth Error: ' + decodeURIComponent(oauthError);
+        errorDiv.style.display = 'block';
+      }
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
     ${!hasToken ? `
     document.getElementById('authForm').addEventListener('submit', async (e) => {
       e.preventDefault();

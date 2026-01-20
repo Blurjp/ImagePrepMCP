@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "figma-smart-image": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sse",
+        "https://figma-smart-image-mcp-production.up.railway.app/mcp"
+      ]
+    }
+  }
+}

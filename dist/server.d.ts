@@ -14,6 +14,7 @@ declare class FigmaSmartImageServer {
     private transportMode;
     private sessionTransports;
     private rateLimiter;
+    private oauthStates;
     constructor(transportMode?: TransportMode);
     /**
      * Get token for a specific session
@@ -30,6 +31,12 @@ declare class FigmaSmartImageServer {
     private handleProcessFigmaLink;
     runStdio(): Promise<void>;
     runHttp(port: number): void;
+    private generateCodeVerifier;
+    private base64URLEncode;
+    private generateCodeChallenge;
+    private generateState;
+    private exchangeCodeForToken;
+    private refreshAccessToken;
     private getAuthPage;
     run(): Promise<void>;
 }
