@@ -19,7 +19,17 @@ The live deployment supports **multi-tenant authentication** - multiple users ca
 
 ## Quick Start (Using Live Deployment)
 
-### Step 1: Configure Claude Code CLI
+### Option A: Quick Command (Recommended for most users)
+
+Run this command in your terminal:
+
+```bash
+claude mcp add --transport http figma-smart-image https://figma-smart-image-mcp-production.up.railway.app/mcp
+```
+
+That's it! Now skip to **Step 2** below.
+
+### Option B: Manual Configuration (.clauderc file)
 
 Create or update `.clauderc` in your project directory:
 
