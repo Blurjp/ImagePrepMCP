@@ -17,11 +17,11 @@ node dist/server.js --transport http --port 3845
 # 4. In another terminal, register with Claude (one-time)
 claude mcp add --transport http figma-smart-image http://127.0.0.1:3845/mcp
 
-# 5. Visit in browser to add your Figma token
+# 5. Visit in browser to authenticate with Figma via OAuth
 open http://localhost:3845/
 ```
 
-Get your Figma token from: https://www.figma.com/settings
+Click "Connect to Figma" to authorize via OAuth. No manual token needed!
 
 ## Features
 
@@ -29,7 +29,10 @@ Get your Figma token from: https://www.figma.com/settings
 - **Smart Format Selection**: Tries SVG first (best for UI), falls back to PNG
 - **Size Optimization**: All images are compressed to fit size constraints (default 4MB)
 - **Automatic Tiling**: Large designs are split into overlapping tiles
-- **Multi-Tenant Support**: Each session has its own token, safe for public hosting
+- **OAuth 2.0 Authentication**: Secure PKCE flow for Figma authorization
+- **Multi-Tenant Support**: Each user has their own OAuth token, safe for public hosting
+- **Redis Storage**: Reliable token storage with automatic expiration (1 hour)
+- **Token Refresh**: Automatic token refresh for long-running sessions
 - **Rate Limiting**: Built-in protection against API abuse (100 req/min per IP)
 - **Session Cleanup**: Expired sessions are automatically cleaned up
 - **Fallback Node Selection**: If no node-id is provided, selects the first frame automatically
@@ -49,31 +52,80 @@ The service is deployed at: **https://figma-smart-image-mcp-production.up.railwa
 claude mcp add --transport http figma-smart-image https://figma-smart-image-mcp-production.up.railway.app/mcp
 ```
 
-### Users Authenticate Themselves
+### Users Authenticate Themselves via OAuth
 
-Each user visits the service URL to add their own Figma token:
+Each user visits the service URL to authenticate with Figma:
 ```
 https://figma-smart-image-mcp-production.up.railway.app/
 ```
 
-**Security**: Each user's Figma token is stored in-memory for their session only. Tokens are never persisted to disk and are automatically cleaned up after 1 hour.
+**OAuth Flow**:
+1. Click "Connect to Figma" button
+2. Redirect to Figma's OAuth authorization page
+3. Authorize the application
+4. Redirect back with authorization code
+5. Server exchanges code for access token
+6. Token stored in Redis for 1 hour (auto-refreshed)
+
+**Security**: Each user's OAuth token is stored securely in Redis with automatic expiration. Tokens are unique per session and never shared between users.
 
 ### Railway Configuration
 
 The project includes:
-- `Dockerfile` - Container build configuration
+- `.nixpacks.toml` - Build configuration for Railway
 - `package.json` - Dependencies and scripts
+- `Procfile` - Process startup configuration
 
-**Environment Variables** (optional on Railway):
-- None required - the service works out of the box
-- `PORT` is automatically set by Railway
+**Required Environment Variables**:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `FIGMA_CLIENT_ID` | Figma OAuth Client ID | `v6XQDfqJ17Q7yQMewrboBE` |
+| `FIGMA_CLIENT_SECRET` | Figma OAuth Client Secret | `your-secret-here` |
+| `REDIS_URL` | Redis connection URL | Auto-provided by Railway |
+
+**Setting up Figma OAuth App**:
+1. Go to [Figma Developer Portal](https://www.figma.com/developers/apps)
+2. Create a new app
+3. Set callback URL: `https://your-domain.railway.app/oauth/callback`
+4. Copy Client ID and Secret to Railway environment variables
 
 ## Local Development
 
 ### Prerequisites
 
-- Node.js 18+
-- A Figma account with a personal access token
+- Node.js 20+
+- Redis (optional - will use in-memory fallback if not available)
+- Figma OAuth app credentials (for OAuth flow)
+
+### Setting up OAuth for Local Development
+
+1. **Create a Figma OAuth App**:
+   - Go to https://www.figma.com/developers/apps
+   - Create a new app
+   - Set callback URL: `http://localhost:3845/oauth/callback`
+   - Copy Client ID and Secret
+
+2. **Set environment variables**:
+   ```bash
+   export FIGMA_CLIENT_ID="your_client_id"
+   export FIGMA_CLIENT_SECRET="your_client_secret"
+   # Optional: For Redis storage
+   export REDIS_URL="redis://localhost:6379"
+   ```
+
+3. **Start the server**:
+   ```bash
+   npm run build
+   node dist/server.js --transport http --port 3845
+   ```
+
+4. **Visit the authentication page**:
+   ```
+   http://localhost:3845/
+   ```
+
+5. **Click "Connect to Figma"** to authorize via OAuth
 
 ### Step-by-Step Setup
 
@@ -92,21 +144,21 @@ The project includes:
    npm run build
    ```
 
-4. **Start the server:**
+4. **Set up environment variables** (see "Setting up OAuth" above)
+
+5. **Start the server:**
    ```bash
    node dist/server.js --transport http --port 3845
    ```
 
-5. **Register with Claude (one-time):**
+6. **Register with Claude (one-time):**
    ```bash
    claude mcp add --transport http figma-smart-image http://127.0.0.1:3845/mcp
    ```
 
-6. **Set up your Figma token:**
-   - Go to https://www.figma.com/settings
-   - Create a personal access token
+7. **Authenticate with Figma:**
    - Visit http://localhost:3845/ in your browser
-   - Paste your token and click "Save Token"
+   - Click "Connect to Figma" to authorize via OAuth
 
 ## Important: Server Must Be Running
 
@@ -244,11 +296,13 @@ When running with `--transport http`, the server provides:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Authentication page |
-| `/auth` | GET/POST | Token status / Save token |
+| `/` | GET | Authentication page with OAuth button |
+| `/oauth/authorize` | GET | OAuth authorization flow initiation |
+| `/oauth/callback` | GET | OAuth callback handler |
 | `/mcp` | GET | SSE connection endpoint |
 | `/message` | POST | Message endpoint for SSE client |
-| `/health` | GET | Health check |
+| `/health` | GET | Health check with Redis status |
+| `/auth` | GET/POST | Legacy token endpoint (deprecated) |
 
 ## Troubleshooting
 
@@ -280,14 +334,37 @@ This happens when:
 
 **Solution**: Omit the `node-id` parameter to auto-select the first frame.
 
+### OAuth Not Configured
+
+**Error**: "OAuth Not Configured - FIGMA_CLIENT_ID environment variable is not set"
+
+**Solution**:
+1. Ensure you've created a Figma OAuth app
+2. Set environment variables:
+   ```bash
+   export FIGMA_CLIENT_ID="your_client_id"
+   export FIGMA_CLIENT_SECRET="your_client_secret"
+   ```
+3. Restart the server
+
+### OAuth Callback Error
+
+**Error**: Callback returns error or fails to complete
+
+**Solutions**:
+1. Ensure callback URL in Figma app matches your deployment URL
+   - Local: `http://localhost:3845/oauth/callback`
+   - Railway: `https://your-domain.railway.app/oauth/callback`
+2. Check that Figma app has "file_read" scope
+3. Verify REDIS_URL is set (for multi-tenant storage)
+
 ### "Invalid token" error
 
-Your Figma token may have expired or been revoked:
+Your OAuth token may have expired:
 
-1. Go to https://www.figma.com/settings
-2. Create a new personal access token
-3. Visit http://localhost:3845/
-4. Update your token
+1. Visit http://localhost:3845/
+2. Click "Connect to Figma" to re-authorize
+3. Tokens auto-refresh every hour when active
 
 ### Port already in use
 
@@ -307,7 +384,7 @@ claude mcp add --transport http figma-smart-image http://127.0.0.1:3846/mcp
 ### Permission Errors
 
 Check:
-1. Your Figma token is valid
+1. You've authorized the app via OAuth
 2. You have access to the Figma file
 3. The file contains at least one frame or component
 
@@ -319,6 +396,7 @@ Check:
 figma-smart-image-mcp/
 ├── src/
 │   ├── server.ts          # MCP server entry point
+│   ├── redis.ts           # Redis storage for OAuth tokens
 │   ├── figma/
 │   │   ├── parse_link.ts  # URL parsing
 │   │   ├── api.ts         # Figma API client
@@ -329,6 +407,8 @@ figma-smart-image-mcp/
 │   │   └── crops.ts       # Heuristic crops
 │   └── util/
 │       └── fs.ts          # File system utilities
+├── .nixpacks.toml         # Railway build configuration
+├── Procfile               # Process startup
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -353,3 +433,5 @@ Built with:
 - [Sharp](https://sharp.pixelplumbing.com/) for image processing
 - [Undici](https://undici.nodejs.org/) for HTTP requests
 - [Zod](https://zod.dev/) for schema validation
+- [ioredis](https://github.com/luin/ioredis) for Redis storage
+- [Railway](https://railway.app/) for deployment infrastructure
