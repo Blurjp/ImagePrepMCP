@@ -544,13 +544,16 @@ class FigmaSmartImageServer {
             // OAuth discovery endpoint - required by MCP HTTP transport
             // We provide minimal OAuth response for compatibility, but use simple token auth
             if (url.pathname === "/.well-known/oauth-authorization-server") {
+                const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+                    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+                    : `http://localhost:${port}`;
                 res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
                 res.end(JSON.stringify({
-                    issuer: `http://localhost:${port}`,
-                    authorization_endpoint: `http://localhost:${port}/`,
-                    token_endpoint: `http://localhost:${port}/oauth/token`,
-                    registration_endpoint: `http://localhost:${port}/register`,
-                    device_authorization_endpoint: `http://localhost:${port}/device/authorize`,
+                    issuer: baseUrl,
+                    authorization_endpoint: `${baseUrl}/`,
+                    token_endpoint: `${baseUrl}/oauth/token`,
+                    registration_endpoint: `${baseUrl}/register`,
+                    device_authorization_endpoint: `${baseUrl}/device/authorize`,
                     response_types_supported: ["code"],
                     grant_types_supported: ["authorization_code", "urn:ietf:params:oauth:grant-type:device_code"],
                     code_challenge_methods_supported: ["S256"],
