@@ -1,0 +1,8 @@
+[phases.build]
+cmds = ["npm install && npm run build"]
+
+[phases.start]
+cmds = ["node dist/server.js --transport http --port $PORT"]
+
+[variables]
+NODE_VERSION = "20"
