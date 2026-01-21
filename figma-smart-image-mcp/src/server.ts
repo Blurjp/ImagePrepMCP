@@ -641,9 +641,19 @@ class FigmaSmartImageServer {
       // OAuth discovery endpoint - required by MCP HTTP transport
       // We provide minimal OAuth response for compatibility, but use simple token auth
       if (url.pathname === "/.well-known/oauth-authorization-server") {
-        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-          : `http://localhost:${port}`;
+        // Determine base URL from environment or request host
+        let baseUrl: string;
+        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        } else if (process.env.RAILWAY_STATIC_URL) {
+          baseUrl = process.env.RAILWAY_STATIC_URL;
+        } else if (req.headers.host && req.headers.host !== `localhost:${port}`) {
+          // Use request host header for Railway deployment
+          const protocol = req.headers['x-forwarded-proto'] || (req.connection as any).encrypted ? 'https' : 'http';
+          baseUrl = `${protocol}://${req.headers.host}`;
+        } else {
+          baseUrl = `http://localhost:${port}`;
+        }
 
         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({
