@@ -835,6 +835,29 @@ class FigmaSmartImageServer {
         return;
       }
 
+      // Debug endpoint - check OAuth configuration
+      if (url.pathname === "/debug") {
+        const clientId = process.env.FIGMA_CLIENT_ID;
+        const clientSecret = process.env.FIGMA_CLIENT_SECRET;
+        const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          oauth: {
+            clientId: clientId ? `${clientId.slice(0, 8)}...` : "NOT_SET",
+            clientSecret: clientSecret ? `${clientSecret.slice(0, 8)}... (length: ${clientSecret.length})` : "NOT_SET",
+            railwayDomain: railwayDomain || "NOT_SET",
+            redirectUri: railwayDomain ? `https://${railwayDomain}/oauth/callback` : "NOT_SET",
+          },
+          config: {
+            hasClientId: !!clientId,
+            hasClientSecret: !!clientSecret,
+            clientSecretLength: clientSecret?.length || 0,
+          },
+        }, null, 2));
+        return;
+      }
+
       // Authentication page
       if (url.pathname === "/auth") {
         res.writeHead(200, { "Content-Type": "text/html" });
@@ -1218,8 +1241,14 @@ class FigmaSmartImageServer {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Token exchange failed: ${error}`);
+      const errorText = await response.text();
+      console.error('Token exchange failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+        url: 'https://www.figma.com/api/v2/oauth/token',
+      });
+      throw new Error(`Token exchange failed (${response.status}): ${errorText}`);
     }
 
     const tokenData = await response.json() as {
