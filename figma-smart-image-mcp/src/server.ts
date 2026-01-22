@@ -647,9 +647,9 @@ class FigmaSmartImageServer {
           baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
         } else if (process.env.RAILWAY_STATIC_URL) {
           baseUrl = process.env.RAILWAY_STATIC_URL;
-        } else if (req.headers.host && req.headers.host !== `localhost:${port}`) {
-          // Use request host header for Railway deployment
-          const protocol = req.headers['x-forwarded-proto'] || (req.connection as any).encrypted ? 'https' : 'http';
+        } else if (req.headers.host) {
+          // Use request host header - prefer x-forwarded-proto for Railway/proxy deployments
+          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
           baseUrl = `${protocol}://${req.headers.host}`;
         } else {
           baseUrl = `http://localhost:${port}`;
@@ -672,9 +672,15 @@ class FigmaSmartImageServer {
 
       // OAuth device authorization endpoint - returns info about web auth
       if (url.pathname === "/oauth/device_authorization" && req.method === "POST") {
-        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-          : `http://localhost:${port}`;
+        let baseUrl: string;
+        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        } else if (req.headers.host) {
+          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+          baseUrl = `${protocol}://${req.headers.host}`;
+        } else {
+          baseUrl = `http://localhost:${port}`;
+        }
 
         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({
@@ -743,10 +749,20 @@ class FigmaSmartImageServer {
             }
 
             // Still waiting for user to authenticate
+            let authUrl: string;
+            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+              authUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+            } else if (req.headers.host) {
+              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+              authUrl = `${protocol}://${req.headers.host}`;
+            } else {
+              authUrl = `http://localhost:${port}`;
+            }
+
             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
             res.end(JSON.stringify({
               error: "authorization_pending",
-              error_description: "Please visit " + (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`) + "/ to authenticate with your Figma token",
+              error_description: `Please visit ${authUrl}/ to authenticate with your Figma token`,
             }));
             return;
           }
@@ -783,10 +799,16 @@ class FigmaSmartImageServer {
               verified: !!this.figmaToken, // Auto-verify if token already exists
             });
 
-            // Use Railway domain if available, otherwise localhost
-            const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-              ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-              : `http://localhost:${port}`;
+            // Use Railway domain if available, otherwise from request host
+            let baseUrl: string;
+            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+              baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+            } else if (req.headers.host) {
+              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+              baseUrl = `${protocol}://${req.headers.host}`;
+            } else {
+              baseUrl = `http://localhost:${port}`;
+            }
 
             res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
             res.end(JSON.stringify({
@@ -852,9 +874,15 @@ class FigmaSmartImageServer {
           return;
         }
 
-        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-          : `http://localhost:${HTTP_PORT}`;
+        let baseUrl: string;
+        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        } else if (req.headers.host) {
+          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+          baseUrl = `${protocol}://${req.headers.host}`;
+        } else {
+          baseUrl = `http://localhost:${HTTP_PORT}`;
+        }
 
         const redirectUri = `${baseUrl}/oauth/callback`;
         const codeVerifier = this.generateCodeVerifier();
@@ -873,7 +901,7 @@ class FigmaSmartImageServer {
           const figmaAuthUrl = new URL("https://www.figma.com/oauth");
           figmaAuthUrl.searchParams.set("client_id", clientId);
           figmaAuthUrl.searchParams.set("redirect_uri", redirectUri);
-          figmaAuthUrl.searchParams.set("scope", "files:read");
+          figmaAuthUrl.searchParams.set("scope", "file_content:read");
           figmaAuthUrl.searchParams.set("state", state);
           figmaAuthUrl.searchParams.set("response_type", "code");
           figmaAuthUrl.searchParams.set("code_challenge", codeChallenge);
