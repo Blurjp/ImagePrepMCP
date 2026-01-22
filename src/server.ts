@@ -21,6 +21,7 @@ import { createServer as createHttpServer, IncomingMessage, ServerResponse } fro
 import { URL } from "url";
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from "fs";
 import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { homedir } from "os";
 
 import { FigmaLinkParser } from "./figma/parse_link.js";
@@ -835,10 +836,26 @@ class FigmaSmartImageServer {
       }
 
       // Authentication page
-      if (url.pathname === "/") {
+      if (url.pathname === "/auth") {
         res.writeHead(200, { "Content-Type": "text/html" });
         const hasOAuth = !!(process.env.FIGMA_CLIENT_ID);
         res.end(this.getAuthPage(hasOAuth));
+        return;
+      }
+
+      // Landing page
+      if (url.pathname === "/") {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        try {
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+          const landingPage = readFileSync(join(__dirname, "public/index.html"), "utf-8");
+          res.end(landingPage);
+        } catch {
+          // Fallback to auth page if landing page not found
+          const hasOAuth = !!(process.env.FIGMA_CLIENT_ID);
+          res.end(this.getAuthPage(hasOAuth));
+        }
         return;
       }
 
@@ -891,7 +908,7 @@ class FigmaSmartImageServer {
         const error = url.searchParams.get("error");
 
         if (error) {
-          res.writeHead(302, { Location: `/?error=${encodeURIComponent(error)}` });
+          res.writeHead(302, { Location: `/auth?error=${encodeURIComponent(error)}` });
           res.end();
           return;
         }
@@ -932,12 +949,12 @@ class FigmaSmartImageServer {
           await sessionTokensStorage.set(state, sessionData);
 
           // Redirect back to auth page with success
-          res.writeHead(302, { Location: `/?oauth=success&session=${state}` });
+          res.writeHead(302, { Location: `/auth?oauth=success&session=${state}` });
           res.end();
         } catch (error) {
           console.error("[OAuth Callback] Error:", error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          res.writeHead(302, { Location: `/?error=${encodeURIComponent(errorMessage)}` });
+          res.writeHead(302, { Location: `/auth?error=${encodeURIComponent(errorMessage)}` });
           res.end();
         }
         return;
