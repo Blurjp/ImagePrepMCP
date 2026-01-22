@@ -1,5 +1,6 @@
 [build]
 builder = "NIXPACKS"
+buildCommand = "npm run build"
 
 [deploy]
 startCommand = "node dist/server.js --transport http --port $PORT"
