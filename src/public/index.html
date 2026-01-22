@@ -244,6 +244,58 @@
       font-size: 0.95rem;
     }
 
+    /* Description Section */
+    .description {
+      padding: 80px 0;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .description-content {
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .description h2 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 32px;
+    }
+
+    .description p {
+      color: var(--text-secondary);
+      font-size: 1.125rem;
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+
+    .use-cases {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 24px;
+      margin-top: 48px;
+      text-align: left;
+    }
+
+    .use-case {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .use-case h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--figma-pink);
+    }
+
+    .use-case p {
+      font-size: 0.9rem;
+      margin: 0;
+    }
+
     /* How It Works */
     .how-it-works {
       padding: 80px 0;
@@ -406,7 +458,47 @@
             <path d="M5 12h14M12 5l7 7-7 7"/>
           </svg>
         </a>
-        <a href="#features" class="btn btn-secondary">Learn More</a>
+        <a href="#description" class="btn btn-secondary">Learn More</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- Description Section -->
+  <section class="description">
+    <div class="container description-content">
+      <h2>What is Figma Smart Image MCP?</h2>
+      <p>
+        Figma Smart Image MCP is a <strong>Model Context Protocol (MCP) server</strong> that bridges the gap between
+        your Figma designs and Claude AI. It transforms Figma design links into optimized, Claude-readable images
+        that can be analyzed, discussed, and used for design iterations.
+      </p>
+      <p>
+        Whether you're a designer seeking AI feedback, a developer implementing designs, or a product manager
+        reviewing UI components, this tool makes it seamless to bring Figma designs into your AI conversations.
+      </p>
+      <p>
+        The server handles all the complex work—exporting from Figma's API, tiling large designs, compressing
+        for context limits, and intelligently cropping UI components—so you can simply share a Figma link
+        and focus on the conversation with Claude.
+      </p>
+
+      <div class="use-cases">
+        <div class="use-case">
+          <h4>🎨 Design Review</h4>
+          <p>Get AI feedback on layouts, colors, typography, and UX patterns</p>
+        </div>
+        <div class="use-case">
+          <h4>💻 Handoff to Dev</h4>
+          <p>Help Claude understand designs for implementation assistance</p>
+        </div>
+        <div class="use-case">
+          <h4>🔍 Component Extraction</h4>
+          <p>Isolate and analyze specific UI components independently</p>
+        </div>
+        <div class="use-case">
+          <h4>📊 Design Analysis</h4>
+          <p>Analyze design systems, patterns, and accessibility considerations</p>
+        </div>
       </div>
     </div>
   </section>
