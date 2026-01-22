@@ -857,6 +857,20 @@ class FigmaSmartImageServer {
         return;
       }
 
+      // Debug endpoint to check environment
+      if (url.pathname === "/debug/env") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN || null,
+          RAILWAY_STATIC_URL: process.env.RAILWAY_STATIC_URL || null,
+          PORT: process.env.PORT || null,
+          requestHost: req.headers.host || null,
+          xForwardedProto: req.headers['x-forwarded-proto'] || null,
+          nodeVersion: process.version,
+        }));
+        return;
+      }
+
       // Authentication page
       if (url.pathname === "/") {
         res.writeHead(200, { "Content-Type": "text/html" });
