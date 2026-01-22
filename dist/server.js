@@ -754,7 +754,7 @@ class FigmaSmartImageServer {
                     const figmaAuthUrl = new URL("https://www.figma.com/oauth");
                     figmaAuthUrl.searchParams.set("client_id", clientId);
                     figmaAuthUrl.searchParams.set("redirect_uri", redirectUri);
-                    figmaAuthUrl.searchParams.set("scope", "file_read");
+                    figmaAuthUrl.searchParams.set("scope", "file_content:read");
                     figmaAuthUrl.searchParams.set("state", state);
                     figmaAuthUrl.searchParams.set("response_type", "code");
                     figmaAuthUrl.searchParams.set("code_challenge", codeChallenge);
