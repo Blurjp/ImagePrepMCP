@@ -735,10 +735,14 @@ class FigmaSmartImageServer {
 
             // If still not authenticated, check for ANY recent OAuth token
             if (!hasAuthenticated) {
+              console.error(`[OAuth Debug] Checking for recent OAuth tokens for device code: ${deviceCode}`);
               const mostRecent = await sessionTokensStorage.getMostRecent();
+              console.error(`[OAuth Debug] getMostRecent result:`, mostRecent ? `Found (createdAt: ${mostRecent.value?.createdAt}, hasToken: ${!!mostRecent.value?.token})` : 'null');
               if (mostRecent?.value?.token) {
                 console.error(`[OAuth Token] Using most recent OAuth token for device code ${deviceCode}`);
                 hasAuthenticated = true;
+              } else {
+                console.error(`[OAuth Debug] No valid OAuth token found`);
               }
             }
 
