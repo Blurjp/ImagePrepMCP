@@ -721,7 +721,7 @@ class FigmaSmartImageServer {
               return;
             }
 
-            // Check sessionTokens first (more reliable than deviceCodes)
+            // Check sessionTokens first (specific to this device code)
             const sessionToken = await sessionTokensStorage.get(deviceCode);
 
             let hasAuthenticated = !!sessionToken;
@@ -731,6 +731,15 @@ class FigmaSmartImageServer {
             if (!hasAuthenticated) {
               deviceInfo = await deviceCodesStorage.get(deviceCode);
               hasAuthenticated = deviceInfo?.verified && (deviceInfo?.figmaToken || this.figmaToken);
+            }
+
+            // If still not authenticated, check for ANY recent OAuth token
+            if (!hasAuthenticated) {
+              const mostRecent = await sessionTokensStorage.getMostRecent();
+              if (mostRecent?.value?.token) {
+                console.error(`[OAuth Token] Using most recent OAuth token for device code ${deviceCode}`);
+                hasAuthenticated = true;
+              }
             }
 
             if (hasAuthenticated) {
