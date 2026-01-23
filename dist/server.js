@@ -798,9 +798,10 @@ class FigmaSmartImageServer {
                         return;
                     }
                     // Fetch the design from Figma API
+                    // OAuth tokens use "Authorization: Bearer" header (not X-Figma-Token)
                     const figmaResponse = await fetch(`https://api.figma.com/v1/files/${fileKey}`, {
                         headers: {
-                            "X-Figma-Token": sessionData.token,
+                            "Authorization": `Bearer ${sessionData.token}`,
                         },
                     });
                     if (!figmaResponse.ok) {
