@@ -649,6 +649,28 @@ class FigmaSmartImageServer {
                             }));
                             return;
                         }
+                        // For the hardcoded "web_auth" device code, auto-create it if we have OAuth tokens
+                        if (deviceCode === "web_auth") {
+                            const mostRecent = await sessionTokensStorage.getMostRecent();
+                            if (mostRecent?.value?.token) {
+                                // Auto-create device code entry for web_auth
+                                await deviceCodesStorage.set(deviceCode, {
+                                    userCode: "WEB",
+                                    clientId: "web",
+                                    createdAt: Date.now(),
+                                    verified: true,
+                                    figmaToken: mostRecent.value.token,
+                                });
+                                // Return success immediately
+                                res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+                                res.end(JSON.stringify({
+                                    access_token: deviceCode,
+                                    token_type: "Bearer",
+                                    expires_in: 3600,
+                                }));
+                                return;
+                            }
+                        }
                         // Check if device code exists at all
                         const deviceExists = await deviceCodesStorage.get(deviceCode) || sessionToken;
                         if (!deviceExists) {
