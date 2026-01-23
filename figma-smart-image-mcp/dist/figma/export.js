@@ -41,7 +41,7 @@ export class FigmaExporter {
      * Tries SVG first, falls back to PNG.
      */
     async exportAndDownload(fileKey, nodeId, outputDir, forceFormat = "auto", baseName = "source") {
-        let format = "svg";
+        let format = "svg"; // Default to SVG for better quality
         let imageUrl;
         if (forceFormat === "auto") {
             // Try SVG first (better quality for UI designs), fall back to PNG

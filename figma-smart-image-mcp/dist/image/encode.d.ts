@@ -23,6 +23,7 @@ export declare class ImageEncoder {
     private tryEncode;
     /**
      * Convert SVG to PNG for processing.
+     * Uses svg2img library since Sharp doesn't support SVG.
      */
     convertSvgToPng(svgPath: string, pngPath: string, scale?: number): Promise<{
         width: number;
