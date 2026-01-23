@@ -743,6 +743,28 @@ class FigmaSmartImageServer {
                 }, null, 2));
                 return;
             }
+            // Debug logs endpoint - check recent OAuth logs
+            if (url.pathname === "/debug/logs") {
+                const recentLogs = [];
+                const maxLogs = 50;
+                // Try to read from a log file if it exists
+                try {
+                    const { existsSync, readFileSync } = await import('fs');
+                    const logPath = '/tmp/oauth-logs.txt';
+                    if (existsSync(logPath)) {
+                        const logContent = readFileSync(logPath, 'utf-8');
+                        const lines = logContent.split('\n').filter(l => l.includes('[OAuth'));
+                        recentLogs.push(...lines.slice(-maxLogs));
+                    }
+                }
+                catch { }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    logs: recentLogs,
+                    note: recentLogs.length === 0 ? "No OAuth logs found. Complete OAuth flow to see logs." : `Last ${recentLogs.length} OAuth-related log entries`,
+                }, null, 2));
+                return;
+            }
             // Debug sessions endpoint - check stored OAuth sessions
             if (url.pathname === "/debug/sessions") {
                 const entries = await sessionTokensStorage.entries();
@@ -915,8 +937,16 @@ class FigmaSmartImageServer {
                 // Clean up state
                 this.oauthStates.delete(state);
                 try {
+                    console.log("[OAuth Callback] Exchanging code for token, state:", state);
                     // Exchange code for access token
                     const tokenResponse = await this.exchangeCodeForToken(code, oauthState.codeVerifier, oauthState.redirectUri);
+                    console.log("[OAuth Callback] Token received:", {
+                        hasAccessToken: !!tokenResponse.access_token,
+                        accessTokenLength: tokenResponse.access_token?.length,
+                        accessTokenPrefix: tokenResponse.access_token?.substring(0, 10),
+                        hasRefreshToken: !!tokenResponse.refresh_token,
+                        expiresIn: tokenResponse.expires_in,
+                    });
                     // Store token in Redis with refresh capability
                     const sessionData = {
                         token: tokenResponse.access_token,
@@ -925,6 +955,7 @@ class FigmaSmartImageServer {
                         createdAt: Date.now(),
                     };
                     await sessionTokensStorage.set(state, sessionData);
+                    console.log("[OAuth Callback] Token stored successfully for session:", state);
                     // Redirect back to auth page with success
                     res.writeHead(302, { Location: `/auth?oauth=success&session=${state}` });
                     res.end();
