@@ -1072,7 +1072,7 @@ class FigmaSmartImageServer {
         params.append('grant_type', 'authorization_code');
         params.append('redirect_uri', redirectUri);
         params.append('code_verifier', codeVerifier);
-        const response = await fetch('https://www.figma.com/api/v2/oauth/token', {
+        const response = await fetch('https://api.figma.com/v1/oauth/token', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -1085,7 +1085,7 @@ class FigmaSmartImageServer {
                 status: response.status,
                 statusText: response.statusText,
                 body: errorText,
-                url: 'https://www.figma.com/api/v2/oauth/token',
+                url: 'https://api.figma.com/v1/oauth/token',
             });
             throw new Error(`Token exchange failed (${response.status}): ${errorText}`);
         }
@@ -1103,7 +1103,7 @@ class FigmaSmartImageServer {
         params.append('client_secret', clientSecret);
         params.append('grant_type', 'refresh_token');
         params.append('refresh_token', refreshToken);
-        const response = await fetch('https://www.figma.com/api/v2/oauth/token', {
+        const response = await fetch('https://api.figma.com/v1/oauth/token', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
