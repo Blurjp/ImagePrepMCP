@@ -1762,23 +1762,25 @@ You can manually extract design tokens by:
     const clientId = process.env.FIGMA_CLIENT_ID;
     const clientSecret = process.env.FIGMA_CLIENT_SECRET;
 
-    if (!clientId) {
-      throw new Error('FIGMA_CLIENT_ID not configured');
+    if (!clientId || !clientSecret) {
+      throw new Error('FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET must be configured');
     }
+
+    // Figma expects form-encoded data for token exchange
+    const params = new URLSearchParams();
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+    params.append('code', code);
+    params.append('grant_type', 'authorization_code');
+    params.append('redirect_uri', redirectUri);
+    params.append('code_verifier', codeVerifier);
 
     const response = await fetch('https://www.figma.com/oauth', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: code,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code_verifier: codeVerifier,
-      }),
+      body: params.toString(),
     });
 
     if (!response.ok) {
@@ -1802,21 +1804,23 @@ You can manually extract design tokens by:
     const clientId = process.env.FIGMA_CLIENT_ID;
     const clientSecret = process.env.FIGMA_CLIENT_SECRET;
 
-    if (!clientId) {
-      throw new Error('FIGMA_CLIENT_ID not configured');
+    if (!clientId || !clientSecret) {
+      throw new Error('FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET must be configured');
     }
+
+    // Figma expects form-encoded data for token refresh
+    const params = new URLSearchParams();
+    params.append('client_id', clientId);
+    params.append('client_secret', clientSecret);
+    params.append('grant_type', 'refresh_token');
+    params.append('refresh_token', refreshToken);
 
     const response = await fetch('https://www.figma.com/oauth', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      }),
+      body: params.toString(),
     });
 
     if (!response.ok) {
