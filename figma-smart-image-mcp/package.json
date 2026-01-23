@@ -11,7 +11,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/server.js",
-    "start:http": "node dist/server.js --transport=http --port=3845"
+    "start:http": "node dist/server.js --transport=http --port=3845",
+    "postinstall": "npm run build"
   },
   "keywords": [
     "mcp",
