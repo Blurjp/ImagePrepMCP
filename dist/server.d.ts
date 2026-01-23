@@ -18,8 +18,10 @@ declare class FigmaSmartImageServer {
     constructor(transportMode?: TransportMode);
     /**
      * Get token for a specific session
-     * Returns session token if available, otherwise falls back to global token
-     * Checks Redis first, then device codes (for OAuth flow)
+     * Returns session token if available, otherwise falls back to:
+     * 1. Most recent OAuth token from Redis
+     * 2. Device codes (for OAuth flow)
+     * 3. Global token
      */
     private getTokenForSession;
     /**
