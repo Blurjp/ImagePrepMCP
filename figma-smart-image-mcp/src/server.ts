@@ -712,7 +712,9 @@ class FigmaSmartImageServer {
 
           // Device code flow polling
           if (grantType === "urn:ietf:params:oauth:grant-type:device_code") {
+            console.error(`[OAuth] Device code flow started for: ${deviceCode || '(missing)'}`);
             if (!deviceCode) {
+              console.error(`[OAuth] ERROR: Missing device_code`);
               res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
               res.end(JSON.stringify({
                 error: "invalid_grant",
@@ -721,8 +723,10 @@ class FigmaSmartImageServer {
               return;
             }
 
+            console.error(`[OAuth] Checking auth for device code: ${deviceCode}`);
             // Check sessionTokens first (specific to this device code)
             const sessionToken = await sessionTokensStorage.get(deviceCode);
+            console.error(`[OAuth] sessionToken result: ${sessionToken ? 'found' : 'not found'}`);
 
             let hasAuthenticated = !!sessionToken;
 
