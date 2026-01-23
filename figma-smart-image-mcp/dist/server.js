@@ -651,8 +651,11 @@ class FigmaSmartImageServer {
                         }
                         // For the hardcoded "web_auth" device code, auto-create it if we have OAuth tokens
                         if (deviceCode === "web_auth") {
+                            console.error(`[OAuth] Checking for most recent OAuth token...`);
                             const mostRecent = await sessionTokensStorage.getMostRecent();
+                            console.error(`[OAuth] getMostRecent result:`, mostRecent ? `Found token (${mostRecent.value?.token?.substring(0, 20)}...)` : 'null');
                             if (mostRecent?.value?.token) {
+                                console.error(`[OAuth] Auto-creating web_auth device code with OAuth token`);
                                 // Auto-create device code entry for web_auth
                                 await deviceCodesStorage.set(deviceCode, {
                                     userCode: "WEB",
@@ -669,6 +672,9 @@ class FigmaSmartImageServer {
                                     expires_in: 3600,
                                 }));
                                 return;
+                            }
+                            else {
+                                console.error(`[OAuth] No OAuth tokens found - cannot auto-create web_auth`);
                             }
                         }
                         // Check if device code exists at all
