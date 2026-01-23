@@ -786,6 +786,21 @@ class FigmaSmartImageServer {
                 }, null, 2));
                 return;
             }
+            // Clear sessions endpoint - remove all stored OAuth sessions
+            if (url.pathname === "/debug/sessions/clear" && req.method === "POST") {
+                const entries = await sessionTokensStorage.entries();
+                const entriesArray = Array.from(entries);
+                for (const [key] of entriesArray) {
+                    await sessionTokensStorage.delete(key);
+                }
+                console.log(`[Debug] Cleared ${entriesArray.length} OAuth sessions`);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    cleared: entriesArray.length,
+                    message: `Cleared ${entriesArray.length} OAuth sessions. Please complete OAuth flow again.`
+                }));
+                return;
+            }
             // Public API endpoint to fetch Figma designs using stored OAuth token
             if (url.pathname === "/api/figma/fetch" && req.method === "GET") {
                 const figmaUrl = url.searchParams.get("url");
