@@ -743,6 +743,72 @@ class FigmaSmartImageServer {
                 }, null, 2));
                 return;
             }
+            // Public API endpoint to fetch Figma designs using stored OAuth token
+            if (url.pathname === "/api/figma/fetch" && req.method === "GET") {
+                const figmaUrl = url.searchParams.get("url");
+                if (!figmaUrl) {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Missing 'url' parameter" }));
+                    return;
+                }
+                // Extract file key from Figma URL
+                // Supports: /design/{key}, /file/{key}, /proto/{key}
+                const urlMatch = figmaUrl.match(/figma\.com\/(?:design|file|proto)\/([a-zA-Z0-9]+)/);
+                if (!urlMatch) {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Invalid Figma URL format" }));
+                    return;
+                }
+                const fileKey = urlMatch[1];
+                try {
+                    // Get the most recent OAuth token from Redis
+                    const entries = await sessionTokensStorage.entries();
+                    const entriesArray = Array.from(entries);
+                    if (entriesArray.length === 0) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({
+                            error: "No OAuth token found. Please authenticate at /auth first."
+                        }));
+                        return;
+                    }
+                    // Get the most recent token (last entry)
+                    const mostRecentSession = entriesArray[entriesArray.length - 1];
+                    const sessionData = mostRecentSession[1];
+                    if (!sessionData?.token) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Invalid session data" }));
+                        return;
+                    }
+                    // Fetch the design from Figma API
+                    const figmaResponse = await fetch(`https://api.figma.com/v1/files/${fileKey}`, {
+                        headers: {
+                            "X-Figma-Token": sessionData.token,
+                        },
+                    });
+                    if (!figmaResponse.ok) {
+                        const errorText = await figmaResponse.text();
+                        console.error("Figma API error:", figmaResponse.status, errorText);
+                        res.writeHead(figmaResponse.status, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({
+                            error: `Figma API error: ${figmaResponse.status}`,
+                            details: errorText
+                        }));
+                        return;
+                    }
+                    const designData = await figmaResponse.json();
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(designData, null, 2));
+                }
+                catch (error) {
+                    console.error("Error fetching Figma design:", error);
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({
+                        error: "Failed to fetch design",
+                        details: error instanceof Error ? error.message : String(error)
+                    }));
+                }
+                return;
+            }
             // Authentication page
             if (url.pathname === "/auth") {
                 res.writeHead(200, { "Content-Type": "text/html" });

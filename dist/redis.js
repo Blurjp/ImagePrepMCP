@@ -146,6 +146,23 @@ export const sessionTokensStorage = {
             return await redis.dbsize(); // Note: this returns total keys, not just session keys
         }
         return inMemorySessionTokens.size;
+    },
+    async entries() {
+        const redis = getRedisClient();
+        if (redis) {
+            const keys = await redis.keys("session:*");
+            const entries = [];
+            for (const key of keys) {
+                const data = await redis.get(key);
+                if (data) {
+                    // Remove 'session:' prefix
+                    const cleanKey = key.substring(8);
+                    entries.push([cleanKey, JSON.parse(data)]);
+                }
+            }
+            return entries;
+        }
+        return Array.from(inMemorySessionTokens.entries());
     }
 };
 /**
