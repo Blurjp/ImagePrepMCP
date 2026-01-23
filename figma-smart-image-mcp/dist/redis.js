@@ -146,6 +146,37 @@ export const sessionTokensStorage = {
             return await redis.dbsize(); // Note: this returns total keys, not just session keys
         }
         return inMemorySessionTokens.size;
+    },
+    async entries() {
+        const redis = getRedisClient();
+        if (redis) {
+            const keys = await redis.keys("session:*");
+            const entries = [];
+            for (const key of keys) {
+                const data = await redis.get(key);
+                if (data) {
+                    // Remove 'session:' prefix
+                    const cleanKey = key.substring(8);
+                    entries.push([cleanKey, JSON.parse(data)]);
+                }
+            }
+            return entries;
+        }
+        return Array.from(inMemorySessionTokens.entries());
+    },
+    async getMostRecent() {
+        const entries = await this.entries();
+        if (entries.length === 0) {
+            return null;
+        }
+        // Find the most recent session by createdAt timestamp
+        let mostRecent = entries[0];
+        for (const entry of entries) {
+            if (entry[1].createdAt > mostRecent[1].createdAt) {
+                mostRecent = entry;
+            }
+        }
+        return { key: mostRecent[0], value: mostRecent[1] };
     }
 };
 /**

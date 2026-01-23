@@ -22,6 +22,11 @@ export declare const sessionTokensStorage: {
     delete(key: string): Promise<void>;
     has(key: string): Promise<boolean>;
     size(): Promise<number>;
+    entries(): Promise<Array<[string, any]>>;
+    getMostRecent(): Promise<{
+        key: string;
+        value: any;
+    } | null>;
 };
 /**
  * Close Redis connection

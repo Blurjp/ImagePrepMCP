@@ -1,0 +1,16 @@
+.DS_Store
+
+# OS files
+*.DS_Store
+
+# Node.js
+node_modules/
+*.log
+*.tgz
+
+# Build outputs
+dist/
+*.vsix
+
+# Local development (not tracked)
+the_app/

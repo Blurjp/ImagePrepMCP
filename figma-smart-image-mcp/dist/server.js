@@ -182,11 +182,10 @@ class FigmaSmartImageServer {
     }
     /**
      * Get token for a specific session
-     * Returns session token if available, otherwise falls back to global token
-     * Checks Redis first, then device codes (for OAuth flow)
+     * Returns session token if available, otherwise falls back to most recent OAuth token, then global token
      */
     async getTokenForSession(sessionId) {
-        // Check session tokens in Redis
+        // Check session tokens in Redis for this specific session
         const sessionData = await sessionTokensStorage.get(sessionId);
         if (sessionData?.token) {
             return sessionData.token;
@@ -196,6 +195,13 @@ class FigmaSmartImageServer {
         if (deviceData?.figmaToken) {
             return deviceData.figmaToken;
         }
+        // Fall back to most recent OAuth token from any session
+        const mostRecent = await sessionTokensStorage.getMostRecent();
+        if (mostRecent?.value?.token) {
+            console.error(`[Auth] Using most recent OAuth token for session ${sessionId}`);
+            return mostRecent.value.token;
+        }
+        // Fall back to global token (for local dev)
         return this.figmaToken;
     }
     /**
