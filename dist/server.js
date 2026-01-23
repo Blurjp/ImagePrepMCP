@@ -751,8 +751,11 @@ class FigmaSmartImageServer {
                     sessionId: key.substring(0, 8) + '...',
                     hasToken: !!value?.token,
                     tokenLength: value?.token?.length || 0,
+                    tokenPreview: value?.token ? value.token.substring(0, 20) + '...' : 'N/A',
+                    hasRefreshToken: !!value?.refreshToken,
                     email: value?.email || 'N/A',
                     createdAt: value?.createdAt ? new Date(value.createdAt).toISOString() : 'N/A',
+                    expiresAt: value?.expiresAt ? new Date(value.expiresAt).toISOString() : 'N/A',
                 }));
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
