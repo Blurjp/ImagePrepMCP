@@ -576,26 +576,48 @@ class FigmaSmartImageServer {
             }
             // OAuth device authorization endpoint - returns info about web auth
             if (url.pathname === "/oauth/device_authorization" && req.method === "POST") {
-                let baseUrl;
-                if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-                    baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-                }
-                else if (req.headers.host) {
-                    const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
-                    baseUrl = `${protocol}://${req.headers.host}`;
-                }
-                else {
-                    baseUrl = `http://localhost:${port}`;
-                }
-                res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
-                res.end(JSON.stringify({
-                    device_code: "web_auth",
-                    user_code: "WEB",
-                    verification_uri: `${baseUrl}/`,
-                    verification_uri_complete: `${baseUrl}/`,
-                    expires_in: 300,
-                    interval: 5,
-                }));
+                let body = "";
+                req.on("data", (chunk) => { body += chunk.toString(); });
+                req.on("end", async () => {
+                    try {
+                        const params = new URLSearchParams(body);
+                        const clientId = params.get("client_id");
+                        // Generate a unique device code for this authorization request
+                        const deviceCode = "device_" + Math.random().toString(36).substring(2, 15);
+                        const userCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                        // Store device code in Redis for later verification
+                        await deviceCodesStorage.set(deviceCode, {
+                            userCode,
+                            clientId: clientId || "unknown",
+                            createdAt: Date.now(),
+                            verified: false, // Don't auto-verify, require user authentication
+                        });
+                        let baseUrl;
+                        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+                            baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+                        }
+                        else if (req.headers.host) {
+                            const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
+                            baseUrl = `${protocol}://${req.headers.host}`;
+                        }
+                        else {
+                            baseUrl = `http://localhost:${port}`;
+                        }
+                        res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+                        res.end(JSON.stringify({
+                            device_code: deviceCode,
+                            user_code: userCode,
+                            verification_uri: `${baseUrl}/`,
+                            verification_uri_complete: `${baseUrl}/`,
+                            expires_in: 600,
+                            interval: 2,
+                        }));
+                    }
+                    catch (error) {
+                        res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+                        res.end(JSON.stringify({ error: "invalid_request" }));
+                    }
+                });
                 return;
             }
             // OAuth token endpoint - handles device code polling and token requests
