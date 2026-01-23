@@ -790,14 +790,49 @@ class FigmaSmartImageServer {
             if (url.pathname === "/health") {
                 const redis = getRedisClient();
                 const deviceCodeKeys = await deviceCodesStorage.keys();
+                const mostRecentOAuth = await sessionTokensStorage.getMostRecent();
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
                     status: "ok",
                     hasToken: !!this.figmaToken,
+                    hasDefaultToken: !!this.figmaToken,
+                    hasOAuthToken: !!mostRecentOAuth?.value?.token,
+                    oauthSessionCount: (await sessionTokensStorage.entries()).length,
                     redis: redis ? "connected" : "disconnected (using in-memory fallback)",
                     activeDevices: deviceCodeKeys.length,
                     activeTransports: this.sessionTransports.size,
                 }));
+                return;
+            }
+            // Direct Figma fetch endpoint (bypasses MCP)
+            if (url.pathname === "/api/fetch-figma" && req.method === "GET") {
+                const figmaUrl = url.searchParams.get("url");
+                if (!figmaUrl) {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Missing url parameter" }));
+                    return;
+                }
+                // Get most recent OAuth token
+                const mostRecent = await sessionTokensStorage.getMostRecent();
+                const token = mostRecent?.value?.token || this.figmaToken;
+                if (!token) {
+                    res.writeHead(401, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "No Figma token available" }));
+                    return;
+                }
+                try {
+                    // Parse and process the Figma URL
+                    const result = await this.handleProcessFigmaLink({
+                        url: figmaUrl,
+                        _meta: { sessionId: "direct_api" }
+                    });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                }
+                catch (error) {
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+                }
                 return;
             }
             // Debug endpoint to check environment
