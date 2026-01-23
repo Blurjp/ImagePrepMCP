@@ -57,9 +57,15 @@ const DEFAULT_INCLUDE_CROPS = false;
 const TRANSPORT_MODE = (process.env.TRANSPORT_MODE || parseArg("--transport") || "stdio");
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || parseArg("--port") || "3845", 10);
 function parseArg(argName) {
+    // First try space-separated format: --transport http
     const argIndex = process.argv.findIndex((arg) => arg === argName);
     if (argIndex !== -1 && argIndex + 1 < process.argv.length) {
         return process.argv[argIndex + 1];
+    }
+    // Then try equals format: --transport=http
+    const equalsArg = process.argv.find((arg) => arg.startsWith(argName + "="));
+    if (equalsArg) {
+        return equalsArg.split("=")[1];
     }
     return undefined;
 }
@@ -806,11 +812,46 @@ class FigmaSmartImageServer {
             };
         }
         catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            // Check if it's a 403 error (Starter Plan doesn't support Variables API)
+            if (errorMessage.includes("403") || errorMessage.includes("Forbidden")) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `# Figma Variables API - Not Available
+
+This Figma file's variables cannot be accessed because the **Figma Variables API requires a Professional Plan or higher**.
+
+## What this means:
+- Your current Figma plan (Starter) doesn't support access to design variables via API
+- The Variables API endpoint returns a 403 Forbidden error
+
+## Alternatives:
+1. **Upgrade to Figma Professional** - Get full API access to variables
+2. **Use other MCP tools** - You can still use:
+   - \`get_figma_components\` - Get component definitions ✅
+   - \`get_figma_node_details\` - Get node layout and styling ✅
+   - \`process_figma_link\` - Export and process designs ✅
+
+## For design tokens:
+You can manually extract design tokens by:
+- Using \`get_figma_node_details\` on specific frames to see colors and spacing
+- Exporting the design as images and analyzing them
+- Using Figma's "Inspect" panel in the Figma app
+
+**Note:** Other Figma MCP tools work normally with your current plan.
+`,
+                        },
+                    ],
+                    isError: false, // Not a hard error, just a limitation
+                };
+            }
             return {
                 content: [
                     {
                         type: "text",
-                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                        text: `Error: ${errorMessage}`,
                     },
                 ],
                 isError: true,
@@ -1246,7 +1287,7 @@ class FigmaSmartImageServer {
                     const figmaAuthUrl = new URL("https://www.figma.com/oauth");
                     figmaAuthUrl.searchParams.set("client_id", clientId);
                     figmaAuthUrl.searchParams.set("redirect_uri", redirectUri);
-                    figmaAuthUrl.searchParams.set("scope", "file_content:read");
+                    figmaAuthUrl.searchParams.set("scope", "file_content:read file_metadata:read file_variables:read");
                     figmaAuthUrl.searchParams.set("state", state);
                     figmaAuthUrl.searchParams.set("response_type", "code");
                     figmaAuthUrl.searchParams.set("code_challenge", codeChallenge);
@@ -2071,7 +2112,12 @@ https://www.figma.com/design/abc123/..."</div>
     }
 }
 // Start the server if running directly (not imported by Vercel)
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1].endsWith('/server.js')) {
+const scriptPath = process.argv[1];
+const isMainModule = import.meta.url === `file://${scriptPath}` ||
+    scriptPath.endsWith('server.js') ||
+    scriptPath.endsWith('/server') ||
+    scriptPath.includes('dist/server.js');
+if (isMainModule) {
     const server = new FigmaSmartImageServer(TRANSPORT_MODE);
     server.run().catch((error) => {
         console.error("Fatal error:", error);

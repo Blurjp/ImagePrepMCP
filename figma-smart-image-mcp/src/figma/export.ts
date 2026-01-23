@@ -67,7 +67,7 @@ export class FigmaExporter {
     forceFormat: "auto" | "svg" | "png" = "auto",
     baseName: string = "source"
   ): Promise<ExportedImage> {
-    let format: "svg" | "png" = "svg";
+    let format: "svg" | "png" = "svg";  // Default to SVG for better quality
     let imageUrl: string;
 
     if (forceFormat === "auto") {
