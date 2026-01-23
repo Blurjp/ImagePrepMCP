@@ -802,8 +802,34 @@ class FigmaSmartImageServer {
                 }));
                 return;
             }
-            // Health check endpoint
+            // Health check endpoint (with optional Figma fetch)
             if (url.pathname === "/health") {
+                const figmaUrl = url.searchParams.get("figma");
+                // If figma parameter provided, fetch the design
+                if (figmaUrl) {
+                    const mostRecent = await sessionTokensStorage.getMostRecent();
+                    const token = mostRecent?.value?.token || this.figmaToken;
+                    if (!token) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "No Figma token available" }));
+                        return;
+                    }
+                    try {
+                        const result = await this.handleProcessFigmaLink({
+                            url: figmaUrl,
+                            _meta: { sessionId: "health_api" }
+                        });
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    catch (error) {
+                        res.writeHead(500, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+                        return;
+                    }
+                }
+                // Normal health check
                 const redis = getRedisClient();
                 const deviceCodeKeys = await deviceCodesStorage.keys();
                 const mostRecentOAuth = await sessionTokensStorage.getMostRecent();
