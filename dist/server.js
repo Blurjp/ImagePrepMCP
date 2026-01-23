@@ -712,10 +712,17 @@ class FigmaSmartImageServer {
             if (url.pathname === "/health") {
                 const redis = getRedisClient();
                 const deviceCodeKeys = await deviceCodesStorage.keys();
+                // Check for OAuth tokens in Redis
+                const oauthSessions = await sessionTokensStorage.entries();
+                const oauthSessionsArray = Array.from(oauthSessions);
+                const hasOAuthToken = oauthSessionsArray.length > 0;
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
                     status: "ok",
-                    hasToken: !!this.figmaToken,
+                    hasToken: !!this.figmaToken || hasOAuthToken,
+                    hasDefaultToken: !!this.figmaToken,
+                    hasOAuthToken: hasOAuthToken,
+                    oauthSessionCount: oauthSessionsArray.length,
                     redis: redis ? "connected" : "disconnected (using in-memory fallback)",
                     activeDevices: deviceCodeKeys.length,
                     activeTransports: this.sessionTransports.size,
