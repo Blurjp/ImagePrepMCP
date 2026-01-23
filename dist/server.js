@@ -743,6 +743,24 @@ class FigmaSmartImageServer {
                 }, null, 2));
                 return;
             }
+            // Debug sessions endpoint - check stored OAuth sessions
+            if (url.pathname === "/debug/sessions") {
+                const entries = await sessionTokensStorage.entries();
+                const entriesArray = Array.from(entries);
+                const sessionInfo = entriesArray.map(([key, value]) => ({
+                    sessionId: key.substring(0, 8) + '...',
+                    hasToken: !!value?.token,
+                    tokenLength: value?.token?.length || 0,
+                    email: value?.email || 'N/A',
+                    createdAt: value?.createdAt ? new Date(value.createdAt).toISOString() : 'N/A',
+                }));
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    totalSessions: entriesArray.length,
+                    sessions: sessionInfo,
+                }, null, 2));
+                return;
+            }
             // Public API endpoint to fetch Figma designs using stored OAuth token
             if (url.pathname === "/api/figma/fetch" && req.method === "GET") {
                 const figmaUrl = url.searchParams.get("url");
