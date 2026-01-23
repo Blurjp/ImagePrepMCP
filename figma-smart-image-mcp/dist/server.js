@@ -1560,7 +1560,7 @@ You can manually extract design tokens by:
         if (!clientId) {
             throw new Error('FIGMA_CLIENT_ID not configured');
         }
-        const response = await fetch('https://www.figma.com/api/oauth/token', {
+        const response = await fetch('https://www.figma.com/oauth', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1587,7 +1587,7 @@ You can manually extract design tokens by:
         if (!clientId) {
             throw new Error('FIGMA_CLIENT_ID not configured');
         }
-        const response = await fetch('https://www.figma.com/api/oauth/token', {
+        const response = await fetch('https://www.figma.com/oauth', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
