@@ -805,7 +805,11 @@ class FigmaSmartImageServer {
                 return;
             }
             // Direct Figma fetch endpoint (bypasses MCP)
+            if (url.pathname.startsWith("/api")) {
+                console.error(`[API] Request: ${req.method} ${url.pathname}`);
+            }
             if (url.pathname === "/api/fetch-figma" && req.method === "GET") {
+                console.error(`[API] Fetching Figma design...`);
                 const figmaUrl = url.searchParams.get("url");
                 if (!figmaUrl) {
                     res.writeHead(400, { "Content-Type": "application/json" });
