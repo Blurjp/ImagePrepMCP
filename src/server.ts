@@ -1985,7 +1985,13 @@ https://www.figma.com/design/abc123/..."</div>
 }
 
 // Start the server if running directly (not imported by Vercel)
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1].endsWith('/server.js')) {
+const scriptPath = process.argv[1];
+const isMainModule = import.meta.url === `file://${scriptPath}` ||
+                      scriptPath.endsWith('server.js') ||
+                      scriptPath.endsWith('/server') ||
+                      scriptPath.includes('dist/server.js');
+
+if (isMainModule) {
   const server = new FigmaSmartImageServer(TRANSPORT_MODE);
   server.run().catch((error) => {
     console.error("Fatal error:", error);
