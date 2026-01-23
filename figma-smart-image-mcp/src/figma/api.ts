@@ -9,6 +9,7 @@ export interface FigmaFileInfo {
   name: string;
   document: any;
   components?: Record<string, any>;
+  componentSets?: Record<string, any>;
 }
 
 export interface FigmaNode {
@@ -27,6 +28,65 @@ export interface FigmaNode {
 export interface ImageExportResult {
   imageUrl: string;
   format: "svg" | "png";
+}
+
+export interface FigmaComponentInfo {
+  key: string;
+  name: string;
+  description: string;
+  componentSetId?: string;
+  documentationLinks: string[];
+}
+
+export interface FigmaComponentSet {
+  key: string;
+  name: string;
+  description: string;
+}
+
+export interface FigmaNodeDetails {
+  id: string;
+  name: string;
+  type: string;
+  absoluteBoundingBox?: { x: number; y: number; width: number; height: number };
+  constraints?: any;
+  layoutMode?: string;
+  primaryAxisSizingMode?: string;
+  counterAxisSizingMode?: string;
+  paddingLeft?: number;
+  paddingRight?: number;
+  paddingTop?: number;
+  paddingBottom?: number;
+  itemSpacing?: number;
+  fills?: any[];
+  strokes?: any[];
+  effects?: any[];
+  opacity?: number;
+  blendMode?: string;
+  characters?: string;
+  style?: any;
+  children?: Array<{ id: string; name: string; type: string }>;
+}
+
+export interface FigmaVariable {
+  id: string;
+  name: string;
+  resolvedType: string;
+  valuesByMode: Record<string, any>;
+  description?: string;
+}
+
+export interface FigmaVariableCollection {
+  id: string;
+  name: string;
+  modes: Array<{ modeId: string; name: string }>;
+}
+
+export interface FigmaVariablesResponse {
+  meta: {
+    variables: Record<string, FigmaVariable>;
+    variableCollections: Record<string, FigmaVariableCollection>;
+  };
 }
 
 export class FigmaApiError extends Error {
@@ -198,6 +258,152 @@ export class FigmaApiClient {
         throw error;
       }
       throw new Error(`Failed to get node info: ${error}`);
+    }
+  }
+
+  /**
+   * Get all components from the file
+   */
+  async getComponents(fileKey: string): Promise<FigmaComponentInfo[]> {
+    const fileInfo = await this.getFileInfo(fileKey);
+
+    const components: FigmaComponentInfo[] = [];
+
+    // Components are at top level in the response
+    if (fileInfo.components) {
+      for (const [key, comp] of Object.entries(fileInfo.components)) {
+        components.push({
+          key: key,
+          name: comp.name,
+          description: comp.description || '',
+          componentSetId: comp.componentSetId,
+          documentationLinks: comp.documentationLinks || []
+        });
+      }
+    }
+
+    return components;
+  }
+
+  /**
+   * Get component sets (variants) from the file
+   */
+  async getComponentSets(fileKey: string): Promise<FigmaComponentSet[]> {
+    const fileInfo = await this.getFileInfo(fileKey);
+
+    const componentSets: FigmaComponentSet[] = [];
+
+    if (fileInfo.componentSets) {
+      for (const [key, compSet] of Object.entries(fileInfo.componentSets)) {
+        componentSets.push({
+          key: key,
+          name: compSet.name,
+          description: compSet.description || ''
+        });
+      }
+    }
+
+    return componentSets;
+  }
+
+  /**
+   * Get detailed node properties including layout, fills, effects
+   */
+  async getNodeDetails(fileKey: string, nodeId: string): Promise<FigmaNodeDetails> {
+    const fileInfo = await this.getFileInfo(fileKey);
+
+    // Traverse document tree to find the node
+    const node = this.findNodeInTree(fileInfo.document, nodeId);
+
+    if (!node) {
+      throw new Error(`Node ${nodeId} not found in file`);
+    }
+
+    return {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+
+      // Layout properties
+      absoluteBoundingBox: node.absoluteBoundingBox,
+      constraints: node.constraints,
+      layoutMode: node.layoutMode,
+      primaryAxisSizingMode: node.primaryAxisSizingMode,
+      counterAxisSizingMode: node.counterAxisSizingMode,
+      paddingLeft: node.paddingLeft,
+      paddingRight: node.paddingRight,
+      paddingTop: node.paddingTop,
+      paddingBottom: node.paddingBottom,
+      itemSpacing: node.itemSpacing,
+
+      // Visual properties
+      fills: node.fills || [],
+      strokes: node.strokes || [],
+      effects: node.effects || [],
+      opacity: node.opacity,
+      blendMode: node.blendMode,
+
+      // Text properties (if text node)
+      characters: node.characters,
+      style: node.style,
+
+      // Children (basic info only)
+      children: node.children?.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        type: c.type
+      }))
+    };
+  }
+
+  /**
+   * Helper method to find a node in the document tree by ID
+   */
+  private findNodeInTree(node: any, targetId: string): any {
+    if (node.id === targetId) {
+      return node;
+    }
+
+    if (node.children) {
+      for (const child of node.children) {
+        const found = this.findNodeInTree(child, targetId);
+        if (found) return found;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get local variables from the file
+   * NOTE: This requires a different API endpoint than getFileInfo()
+   */
+  async getVariables(fileKey: string): Promise<FigmaVariablesResponse> {
+    const url = `${this.baseUrl}/files/${fileKey}/variables/local`;
+
+    try {
+      const response = await request(url, {
+        headers: {
+          "X-Figma-Token": this.accessToken,
+        },
+      });
+
+      if (response.statusCode !== 200) {
+        const body = await response.body.text() as any;
+        throw new FigmaApiError(
+          body.err || `Failed to get variables (status ${response.statusCode})`,
+          response.statusCode,
+          body.code
+        );
+      }
+
+      const data = await response.body.json() as FigmaVariablesResponse;
+      return data;
+    } catch (error) {
+      if (error instanceof FigmaApiError) {
+        throw error;
+      }
+      throw new Error(`Failed to get variables: ${error}`);
     }
   }
 }

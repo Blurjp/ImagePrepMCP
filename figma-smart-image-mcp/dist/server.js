@@ -37,6 +37,15 @@ const ProcessFigmaLinkInputSchema = z.object({
     force_source_format: z.enum(["auto", "svg", "png"]).optional(),
     include_crops: z.boolean().optional(),
 });
+const GetFigmaComponentsInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL"),
+});
+const GetFigmaNodeDetailsInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL with node-id"),
+});
+const GetFigmaVariablesInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL"),
+});
 // Default constants
 const DEFAULT_MAX_BYTES = 4_000_000; // 4MB
 const DEFAULT_MAX_LONG_EDGE = 4096;
@@ -245,12 +254,60 @@ class FigmaSmartImageServer {
                             required: ["url"],
                         },
                     },
+                    {
+                        name: "get_figma_components",
+                        description: "Get all components and component sets from a Figma file. " +
+                            "Returns component definitions with their names, descriptions, and keys. " +
+                            "Useful for understanding the design system and generating code that uses these components.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma file URL" },
+                            },
+                            required: ["url"],
+                        },
+                    },
+                    {
+                        name: "get_figma_node_details",
+                        description: "Get detailed layout and styling information for a specific Figma node. " +
+                            "Returns properties like auto-layout settings, padding, spacing, fills, effects, " +
+                            "and constraints. Essential for accurate code generation.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma URL with node-id parameter" },
+                            },
+                            required: ["url"],
+                        },
+                    },
+                    {
+                        name: "get_figma_variables",
+                        description: "Get design variables (colors, spacing, typography) from a Figma file. " +
+                            "Returns local variables and their values across different modes. " +
+                            "Use this to extract design tokens for your design system.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma file URL" },
+                            },
+                            required: ["url"],
+                        },
+                    },
                 ],
             };
         });
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             if (request.params.name === "process_figma_link") {
                 return await this.handleProcessFigmaLink(request.params.arguments);
+            }
+            if (request.params.name === "get_figma_components") {
+                return await this.handleGetFigmaComponents(request.params.arguments);
+            }
+            if (request.params.name === "get_figma_node_details") {
+                return await this.handleGetFigmaNodeDetails(request.params.arguments);
+            }
+            if (request.params.name === "get_figma_variables") {
+                return await this.handleGetFigmaVariables(request.params.arguments);
             }
             throw new Error(`Unknown tool: ${request.params.name}`);
         });
@@ -490,6 +547,260 @@ class FigmaSmartImageServer {
                     {
                         type: "text",
                         text: responseText,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleGetFigmaComponents(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            // Parse Figma URL
+            const parsed = FigmaLinkParser.parse(args.url);
+            const api = new FigmaApiClient(token);
+            // Get components and component sets
+            const components = await api.getComponents(parsed.fileKey);
+            const componentSets = await api.getComponentSets(parsed.fileKey);
+            // Format output
+            let output = `# Components from Figma File\n\n`;
+            output += `File: ${parsed.fileKey}\n\n`;
+            if (componentSets.length > 0) {
+                output += `## Component Sets (${componentSets.length})\n\n`;
+                componentSets.forEach(set => {
+                    output += `### ${set.name}\n`;
+                    if (set.description) {
+                        output += `${set.description}\n`;
+                    }
+                    output += `Key: ${set.key}\n\n`;
+                });
+            }
+            if (components.length > 0) {
+                output += `## Components (${components.length})\n\n`;
+                components.forEach(comp => {
+                    output += `### ${comp.name}\n`;
+                    if (comp.description) {
+                        output += `${comp.description}\n`;
+                    }
+                    output += `Key: ${comp.key}\n`;
+                    if (comp.componentSetId) {
+                        output += `Component Set ID: ${comp.componentSetId}\n`;
+                    }
+                    if (comp.documentationLinks.length > 0) {
+                        output += `Documentation: ${comp.documentationLinks.join(', ')}\n`;
+                    }
+                    output += `\n`;
+                });
+            }
+            else {
+                output += `No components found in this file.\n`;
+            }
+            // Also return raw JSON
+            output += `\n---\n\n## Raw JSON Data\n\n\`\`\`json\n`;
+            output += JSON.stringify({ components, componentSets }, null, 2);
+            output += `\n\`\`\`\n`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: output,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleGetFigmaNodeDetails(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            // Parse Figma URL
+            const parsed = FigmaLinkParser.parse(args.url);
+            if (!parsed.nodeId) {
+                throw new Error("Node ID is required. Please provide a Figma URL with node-id parameter.");
+            }
+            const api = new FigmaApiClient(token);
+            // Get node details
+            const details = await api.getNodeDetails(parsed.fileKey, parsed.nodeId);
+            // Format output
+            let output = `# Node Details: ${details.name}\n\n`;
+            output += `Type: ${details.type}\n`;
+            output += `ID: ${details.id}\n\n`;
+            // Layout properties
+            if (details.absoluteBoundingBox) {
+                output += `## Bounding Box\n`;
+                output += `- Position: (${details.absoluteBoundingBox.x}, ${details.absoluteBoundingBox.y})\n`;
+                output += `- Size: ${details.absoluteBoundingBox.width} × ${details.absoluteBoundingBox.height}\n\n`;
+            }
+            if (details.layoutMode) {
+                output += `## Auto Layout\n`;
+                output += `- Layout Mode: ${details.layoutMode}\n`;
+                if (details.primaryAxisSizingMode) {
+                    output += `- Primary Axis: ${details.primaryAxisSizingMode}\n`;
+                }
+                if (details.counterAxisSizingMode) {
+                    output += `- Counter Axis: ${details.counterAxisSizingMode}\n`;
+                }
+                if (details.itemSpacing !== undefined) {
+                    output += `- Item Spacing: ${details.itemSpacing}px\n`;
+                }
+                if (details.paddingLeft !== undefined) {
+                    output += `- Padding: ${details.paddingTop || 0}px ${details.paddingRight || 0}px ${details.paddingBottom || 0}px ${details.paddingLeft || 0}px\n`;
+                }
+                output += `\n`;
+            }
+            // Visual properties
+            if (details.fills && details.fills.length > 0) {
+                output += `## Fills (${details.fills.length})\n`;
+                details.fills.forEach((fill, i) => {
+                    output += `${i + 1}. ${fill.type || 'UNKNOWN'}\n`;
+                });
+                output += `\n`;
+            }
+            if (details.effects && details.effects.length > 0) {
+                output += `## Effects (${details.effects.length})\n`;
+                details.effects.forEach((effect, i) => {
+                    output += `${i + 1}. ${effect.type || 'UNKNOWN'}\n`;
+                });
+                output += `\n`;
+            }
+            if (details.opacity !== undefined && details.opacity !== 1) {
+                output += `## Opacity\n${(details.opacity * 100).toFixed(0)}%\n\n`;
+            }
+            // Text properties
+            if (details.characters) {
+                output += `## Text Content\n`;
+                output += `"${details.characters}"\n\n`;
+            }
+            // Children
+            if (details.children && details.children.length > 0) {
+                output += `## Children (${details.children.length})\n`;
+                details.children.forEach(child => {
+                    output += `- ${child.name} (${child.type})\n`;
+                });
+                output += `\n`;
+            }
+            // Raw JSON
+            output += `\n---\n\n## Raw JSON Data\n\n\`\`\`json\n`;
+            output += JSON.stringify(details, null, 2);
+            output += `\n\`\`\`\n`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: output,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleGetFigmaVariables(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            // Parse Figma URL
+            const parsed = FigmaLinkParser.parse(args.url);
+            const api = new FigmaApiClient(token);
+            // Get variables
+            const variablesData = await api.getVariables(parsed.fileKey);
+            // Format output
+            let output = `# Design Variables\n\n`;
+            output += `File: ${parsed.fileKey}\n\n`;
+            const { variables, variableCollections } = variablesData.meta;
+            // Collections
+            const collectionsList = Object.values(variableCollections);
+            if (collectionsList.length > 0) {
+                output += `## Collections (${collectionsList.length})\n\n`;
+                collectionsList.forEach(collection => {
+                    output += `### ${collection.name}\n`;
+                    output += `ID: ${collection.id}\n`;
+                    if (collection.modes.length > 0) {
+                        output += `Modes: ${collection.modes.map(m => m.name).join(', ')}\n`;
+                    }
+                    output += `\n`;
+                });
+            }
+            // Variables
+            const variablesList = Object.values(variables);
+            if (variablesList.length > 0) {
+                output += `## Variables (${variablesList.length})\n\n`;
+                // Group by type
+                const byType = {};
+                variablesList.forEach(v => {
+                    if (!byType[v.resolvedType]) {
+                        byType[v.resolvedType] = [];
+                    }
+                    byType[v.resolvedType].push(v);
+                });
+                Object.entries(byType).forEach(([type, vars]) => {
+                    output += `### ${type} (${vars.length})\n\n`;
+                    vars.forEach(v => {
+                        output += `**${v.name}**\n`;
+                        if (v.description) {
+                            output += `${v.description}\n`;
+                        }
+                        output += `ID: ${v.id}\n`;
+                        output += `Values: ${JSON.stringify(v.valuesByMode)}\n`;
+                        output += `\n`;
+                    });
+                });
+            }
+            else {
+                output += `No variables found in this file.\n`;
+            }
+            // Raw JSON
+            output += `\n---\n\n## Raw JSON Data\n\n\`\`\`json\n`;
+            output += JSON.stringify(variablesData, null, 2);
+            output += `\n\`\`\`\n`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: output,
                     },
                 ],
             };

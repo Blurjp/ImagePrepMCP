@@ -1,6 +1,6 @@
 # Figma Smart Image MCP Server
 
-A Model Context Protocol (MCP) server that processes Figma design links into Claude-readable images. Automatically exports designs from Figma, generates optimized overview images, and splits large designs into overlapping tiles for better vision model understanding.
+A comprehensive Model Context Protocol (MCP) server for Figma integration. Combines visual analysis (image export) with structural data extraction (components, layout properties, design variables). Provides everything the official Figma MCP offers **plus** smart image processing for Claude's vision capabilities.
 
 ## Quick Start
 
@@ -25,18 +25,50 @@ Click "Connect to Figma" to authorize via OAuth. No manual token needed!
 
 ## Features
 
+### Visual Analysis (Image Export)
 - **Automatic Figma Export**: Paste any Figma design link and automatically export the design
 - **Smart Format Selection**: Tries SVG first (best for UI), falls back to PNG
 - **Size Optimization**: All images are compressed to fit size constraints (default 4MB)
-- **Automatic Tiling**: Large designs are split into overlapping tiles
+- **Automatic Tiling**: Large designs are split into overlapping tiles for detailed analysis
+- **Fallback Node Selection**: If no node-id is provided, selects the first frame automatically
+
+### Structural Data Extraction (NEW!)
+- **Component Extraction**: Get all components and component sets (variants) from Figma files
+- **Layout Properties**: Extract auto-layout settings, spacing, padding, constraints
+- **Design Variables**: Access design tokens (colors, spacing, typography) with multi-mode support
+- **Detailed Node Info**: Get fills, effects, opacity, text content, and hierarchy for any node
+
+### Infrastructure
 - **OAuth 2.0 Authentication**: Secure PKCE flow for Figma authorization
 - **Multi-Tenant Support**: Each user has their own OAuth token, safe for public hosting
 - **Redis Storage**: Reliable token storage with automatic expiration (1 hour)
 - **Token Refresh**: Automatic token refresh for long-running sessions
 - **Rate Limiting**: Built-in protection against API abuse (100 req/min per IP)
 - **Session Cleanup**: Expired sessions are automatically cleaned up
-- **Fallback Node Selection**: If no node-id is provided, selects the first frame automatically
 - **HTTP/SSE Transport**: Easy setup with Claude CLI using HTTP transport
+
+## Why This MCP vs Official Figma MCP?
+
+This server is a **superset** of the official Figma MCP - it does everything the official one does, plus more:
+
+| Feature | This Server | Official Figma MCP |
+|---------|-------------|-------------------|
+| Component extraction | ✅ Yes | ✅ Yes |
+| Layout properties | ✅ Yes | ✅ Yes |
+| Design variables | ✅ Yes | ✅ Yes |
+| **Image export** | ✅ **YES!** | ❌ **NO** |
+| **Tiled images for vision** | ✅ **YES!** | ❌ **NO** |
+| **Visual analysis** | ✅ **YES!** | ❌ **NO** |
+
+**Best of both worlds:**
+- 🎨 Visual understanding via images (for Claude's vision)
+- 🏗️ Structural data via API (for code generation)
+- 🎯 Exact design values (no guessing colors/spacing)
+
+**Use cases unique to this server:**
+- "Show me what this design looks like" → Only this server can do it
+- "Build this design exactly" → This server gives Claude both visual context AND exact values
+- "Analyze the visual hierarchy" → This server provides images for vision analysis
 
 ## Deployment to Railway (Public Service)
 
@@ -234,17 +266,144 @@ launchctl unload ~/Library/LaunchAgents/com.figma.smartimage.mcp.plist
 
 ## Usage
 
+### Available Tools
+
+This server provides 4 MCP tools for comprehensive Figma integration:
+
+#### 1. `process_figma_link` - Visual Analysis
+Exports Figma designs as images for Claude's vision capabilities.
+
+**When to use:**
+- Understanding the visual appearance of a design
+- Getting an overview of layouts and compositions
+- Analyzing UI elements visually
+- Large designs that benefit from tiled viewing
+
+**Returns:**
+- Overview image (optimized WebP/JPEG)
+- Tiles for detailed analysis (overlapping 1536px squares)
+- Manifest with metadata
+
+**Example:**
+```
+Use process_figma_link with:
+https://www.figma.com/design/abc123/My-Design?node-id=1-456
+```
+
+#### 2. `get_figma_components` - Component Library
+Extracts all components and component sets (variants) from a Figma file.
+
+**When to use:**
+- Understanding a design system
+- Listing reusable components
+- Finding component variants
+- Code generation from design systems
+
+**Returns:**
+- Component sets (variant groups)
+- Individual components with names, descriptions, keys
+- Component documentation links
+- Raw JSON data
+
+**Example:**
+```
+Use get_figma_components to list all components in:
+https://www.figma.com/design/abc123/Design-System
+```
+
+#### 3. `get_figma_node_details` - Layout Properties
+Gets detailed layout and styling information for a specific node.
+
+**Requires:** URL with `node-id` parameter
+
+**When to use:**
+- Getting exact spacing values
+- Understanding auto-layout configuration
+- Extracting fill/color values
+- Finding shadow/effect properties
+- Analyzing node hierarchy
+
+**Returns:**
+- Bounding box (position, size)
+- Auto-layout properties (mode, spacing, padding)
+- Fills (colors, gradients)
+- Effects (shadows, blurs)
+- Opacity and blend mode
+- Text content (if text node)
+- Children list
+- Raw JSON data
+
+**Example:**
+```
+Use get_figma_node_details with:
+https://www.figma.com/design/abc123/My-Design?node-id=1-456
+```
+
+#### 4. `get_figma_variables` - Design Tokens
+Extracts design variables (design tokens) from a Figma file.
+
+**When to use:**
+- Extracting design tokens
+- Building CSS variables
+- Understanding color systems
+- Getting spacing scales
+- Multi-mode themes (light/dark)
+
+**Returns:**
+- Variable collections with modes
+- Variables grouped by type (COLOR, FLOAT, STRING, BOOLEAN)
+- Values for each mode
+- Raw JSON data
+
+**Example:**
+```
+Use get_figma_variables to extract design tokens from:
+https://www.figma.com/design/abc123/Design-System
+```
+
+### Tool Selection Guide
+
+| User asks for... | Use this tool |
+|------------------|---------------|
+| "Show me the design" | `process_figma_link` |
+| "What components exist?" | `get_figma_components` |
+| "What's the spacing in this frame?" | `get_figma_node_details` |
+| "What are the color tokens?" | `get_figma_variables` |
+| "Build this design" | **ALL 4 TOOLS!** |
+| "Document this design system" | **ALL 4 TOOLS!** |
+
 ### Basic Usage
 
 Simply provide a Figma URL to Claude:
 
+**For visual analysis:**
 ```
-Use the figma-smart-image tool to process this Figma design:
+Show me this design:
 https://www.figma.com/design/abc123/My-Design-File?node-id=1-456
 ```
+Claude will use `process_figma_link` to export images.
+
+**For component extraction:**
+```
+What components are in this design system?
+https://www.figma.com/design/abc123/Design-System
+```
+Claude will use `get_figma_components` to list all components.
+
+**For building a design:**
+```
+Build this Figma design as React code:
+https://www.figma.com/design/abc123/My-Design?node-id=1-456
+```
+Claude will use all 4 tools:
+1. `process_figma_link` - Get visual context
+2. `get_figma_components` - Understand reusable components
+3. `get_figma_node_details` - Get exact spacing/colors
+4. `get_figma_variables` - Extract design tokens
 
 ### Tool Parameters
 
+#### `process_figma_link` Parameters
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `url` | string | (required) | The Figma design URL |
@@ -257,8 +416,14 @@ https://www.figma.com/design/abc123/My-Design-File?node-id=1-456
 | `force_source_format` | "auto" \| "svg" \| "png" | `"auto"` | Force specific export format |
 | `include_crops` | boolean | `false` | Generate heuristic crops |
 
-### Example Output
+#### Other Tools Parameters
+- `get_figma_components`: Only requires `url` (Figma file URL)
+- `get_figma_node_details`: Only requires `url` (Figma URL with `node-id` parameter)
+- `get_figma_variables`: Only requires `url` (Figma file URL)
 
+### Example Outputs
+
+#### `process_figma_link` Output
 ```
 Successfully processed Figma design
 
@@ -277,10 +442,87 @@ Overview:
 Tiles: 6
   out/figma/1768742799088/tiles/tile_0_0.webp: 1536x1536 at (0,0) - 28.68 KB
   out/figma/1768742799088/tiles/tile_0_1.webp: 1536x1536 at (1440,0) - 26.86 KB
-  out/figma/1768742799088/tiles/tile_1_0.webp: 1536x1536 at (0,624) - 22.37 KB
   ...
 
 Manifest: out/figma/1768742799088/manifest.json
+```
+
+#### `get_figma_components` Output
+```markdown
+# Components from Figma File
+
+File: dC3ifprl6oWlApLF1wzOFz
+
+## Component Sets (3)
+### Button
+Button component with variants
+Key: 27:2068
+
+## Components (21)
+### Button/Primary
+Primary action button
+Key: ad7e62d71449d00f09a985fee4fffbf88633e482
+Component Set ID: 27:2068
+
+### Card/Game
+Game card component for launcher
+Key: 5b2c8f...
+```
+
+#### `get_figma_node_details` Output
+```markdown
+# Node Details: Game Launcher Frame
+
+Type: FRAME
+ID: 1:1235
+
+## Bounding Box
+- Position: (0, 0)
+- Size: 1728 × 1117
+
+## Auto Layout
+- Layout Mode: VERTICAL
+- Item Spacing: 16px
+- Padding: 24px 24px 24px 24px
+
+## Fills (1)
+1. SOLID
+
+## Effects (2)
+1. DROP_SHADOW
+2. INNER_SHADOW
+
+## Children (8)
+- Header (FRAME)
+- Title (TEXT)
+- Game Grid (FRAME)
+...
+```
+
+#### `get_figma_variables` Output
+```markdown
+# Design Variables
+
+File: dC3ifprl6oWlApLF1wzOFz
+
+## Collections (2)
+### Color Tokens
+ID: VariableCollectionId:123
+Modes: Light, Dark
+
+## Variables (15)
+
+### COLOR (8)
+**colors/primary**
+Primary brand color
+ID: VariableID:789
+Values: {"Light": {"r": 0.2, "g": 0.5, "b": 1, "a": 1}}
+
+### FLOAT (7)
+**spacing/md**
+Medium spacing
+ID: VariableID:791
+Values: {"Default": 16}
 ```
 
 ## URL Formats Supported
@@ -388,6 +630,45 @@ Check:
 2. You have access to the Figma file
 3. The file contains at least one frame or component
 
+### "No components found in this file"
+
+When using `get_figma_components`:
+
+**Cause**: The Figma file doesn't have any published components.
+
+**This is normal for**:
+- Design files without a component library
+- Files with only frames/groups (not components)
+- Files where components haven't been published
+
+**Solution**: Only design system files with published components will return data.
+
+### "No variables found in this file"
+
+When using `get_figma_variables`:
+
+**Cause**: The Figma file doesn't have any local variables defined.
+
+**This is normal for**:
+- Files created before Figma variables were introduced
+- Files that don't use design tokens
+- Files where designers use styles instead of variables
+
+**Solution**: This is expected and not an error. Not all files have variables.
+
+### "Node ID is required"
+
+When using `get_figma_node_details`:
+
+**Cause**: The URL doesn't include a `node-id` parameter.
+
+**Solutions**:
+1. Get the node ID from Figma:
+   - Right-click layer → "Copy link to layer"
+   - URL will include `?node-id=X-Y`
+2. Use `process_figma_link` first to auto-select a frame and see its node ID
+3. Use `get_figma_components` to get component keys, then use as node IDs
+
 ## Development
 
 ### Project Structure
@@ -435,7 +716,16 @@ Built with:
 - [Zod](https://zod.dev/) for schema validation
 - [ioredis](https://github.com/luin/ioredis) for Redis storage
 - [Railway](https://railway.app/) for deployment infrastructure
-# Force Railway redeploy Wed Jan 21 17:54:52 EST 2026
 
-# GitHub Auto-Deploy Test - 2026-01-21_18:24:12
-# Auto-deploy test 2026-01-22_09:39:06
+**Feature parity with [Official Figma MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/figma)** plus unique image export capabilities.
+
+---
+
+## What's New
+
+### v2.0.0 (2026-01-23) - Component Extraction & Design Variables
+- ✨ Added `get_figma_components` tool - Extract all components and component sets
+- ✨ Added `get_figma_node_details` tool - Get layout properties, spacing, fills, effects
+- ✨ Added `get_figma_variables` tool - Extract design tokens (colors, spacing, etc.)
+- 🎯 Full parity with official Figma MCP while keeping unique image export
+- 📚 Best of both worlds: Visual analysis + Structural data extraction

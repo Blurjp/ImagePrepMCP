@@ -28,6 +28,9 @@ declare class FigmaSmartImageServer {
     private cleanupExpiredSessions;
     private setupHandlers;
     private handleProcessFigmaLink;
+    private handleGetFigmaComponents;
+    private handleGetFigmaNodeDetails;
+    private handleGetFigmaVariables;
     runStdio(): Promise<void>;
     runHttp(port: number): void;
     private generateCodeVerifier;
