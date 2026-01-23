@@ -723,6 +723,23 @@ class FigmaSmartImageServer {
               return;
             }
 
+            // TEMPORARY: Auto-approve "web_auth" if OAuth tokens exist
+            if (deviceCode === "web_auth") {
+              console.error(`[OAuth] web_auth detected - checking for OAuth tokens`);
+              const mostRecent = await sessionTokensStorage.getMostRecent();
+              console.error(`[OAuth] mostRecent result: ${mostRecent ? 'found' : 'null'}`);
+              if (mostRecent?.value?.token) {
+                console.error(`[OAuth] SUCCESS: Returning access token for web_auth`);
+                res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+                res.end(JSON.stringify({
+                  access_token: deviceCode,
+                  token_type: "Bearer",
+                  expires_in: 3600,
+                }));
+                return;
+              }
+            }
+
             console.error(`[OAuth] Checking auth for device code: ${deviceCode}`);
             // Check sessionTokens first (specific to this device code)
             const sessionToken = await sessionTokensStorage.get(deviceCode);
