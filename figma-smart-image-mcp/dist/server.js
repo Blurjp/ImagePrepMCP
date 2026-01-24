@@ -1161,8 +1161,79 @@ You can manually extract design tokens by:
                 }));
                 return;
             }
+            // Debug endpoint for Redis persistence testing
+            if (url.pathname === "/debug/redis-test") {
+                const redis = getRedisClient();
+                if (!redis) {
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Redis not available" }));
+                    return;
+                }
+                const action = url.searchParams.get("action");
+                if (action === "set") {
+                    await redis.set("persist_probe", "ok");
+                    await redis.save();
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ status: "SET persist_probe=ok and called SAVE" }));
+                    return;
+                }
+                if (action === "get") {
+                    const value = await redis.get("persist_probe");
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ persist_probe: value, exists: !!value }));
+                    return;
+                }
+                if (action === "info") {
+                    const info = await redis.info("persistence");
+                    const dir = await redis.config("GET", "dir");
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ persistence_config: dir, info: info }));
+                    return;
+                }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    usage: "Use ?action=set|get|info",
+                    actions: {
+                        set: "SET persist_probe 'ok' and call SAVE",
+                        get: "GET persist_probe value",
+                        info: "Show Redis persistence configuration"
+                    }
+                }));
+                return;
+            }
             // Health check endpoint (with optional Figma fetch)
             if (url.pathname === "/health") {
+                // Debug: Redis persistence test
+                const debugAction = url.searchParams.get("debug");
+                if (debugAction === "set_probe") {
+                    const redis = getRedisClient();
+                    if (redis) {
+                        await redis.set("persist_probe", "ok");
+                        await redis.save();
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ status: "SET persist_probe=ok and called SAVE" }));
+                        return;
+                    }
+                }
+                if (debugAction === "get_probe") {
+                    const redis = getRedisClient();
+                    if (redis) {
+                        const value = await redis.get("persist_probe");
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ persist_probe: value, exists: !!value }));
+                        return;
+                    }
+                }
+                if (debugAction === "redis_info") {
+                    const redis = getRedisClient();
+                    if (redis) {
+                        const info = await redis.info("persistence");
+                        const dir = await redis.config("GET", "dir");
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ persistence_dir: dir, info: info.substring(0, 500) }));
+                        return;
+                    }
+                }
                 const figmaUrl = url.searchParams.get("figma");
                 // If figma parameter provided, fetch the design
                 if (figmaUrl) {
