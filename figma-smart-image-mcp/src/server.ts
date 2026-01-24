@@ -1367,34 +1367,26 @@ You can manually extract design tokens by:
       if (url.pathname === "/health") {
         // Debug: Redis persistence test
         const debugAction = url.searchParams.get("debug");
-        if (debugAction === "set_probe") {
-          const redis = getRedisClient();
-          if (redis) {
-            await redis.set("persist_probe", "ok");
-            await redis.save();
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ status: "SET persist_probe=ok and called SAVE" }));
-            return;
-          }
+        const redis = getRedisClient();
+        if (redis && debugAction === "set_probe") {
+          await redis.set("persist_probe", "ok");
+          await redis.save();
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ status: "SET persist_probe=ok and called SAVE" }));
+          return;
         }
-        if (debugAction === "get_probe") {
-          const redis = getRedisClient();
-          if (redis) {
-            const value = await redis.get("persist_probe");
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ persist_probe: value, exists: !!value }));
-            return;
-          }
+        if (redis && debugAction === "get_probe") {
+          const value = await redis.get("persist_probe");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ persist_probe: value, exists: !!value }));
+          return;
         }
-        if (debugAction === "redis_info") {
-          const redis = getRedisClient();
-          if (redis) {
-            const info = await redis.info("persistence");
-            const dir = await redis.config("GET", "dir");
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ persistence_dir: dir, info: info.substring(0, 500) }));
-            return;
-          }
+        if (redis && debugAction === "redis_info") {
+          const info = await redis.info("persistence");
+          const dir = await redis.config("GET", "dir");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ persistence_dir: dir, info: info.substring(0, 500) }));
+          return;
         }
 
         const figmaUrl = url.searchParams.get("figma");
@@ -1426,7 +1418,6 @@ You can manually extract design tokens by:
         }
 
         // Normal health check
-        const redis = getRedisClient();
         const deviceCodeKeys = await deviceCodesStorage.keys();
         const mostRecentOAuth = await sessionTokensStorage.getMostRecent();
         res.writeHead(200, { "Content-Type": "application/json" });
