@@ -2,14 +2,16 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package.json, tsconfig.json and install dependencies
+# Copy package files
 COPY figma-smart-image-mcp/package.json figma-smart-image-mcp/package-lock.json* figma-smart-image-mcp/tsconfig.json ./
-RUN npm install
+
+# Install dependencies (skip postinstall to avoid premature build)
+RUN npm install --ignore-scripts
 
 # Copy source files
 COPY figma-smart-image-mcp/src ./src
 
-# Build the project
+# Now build the project
 RUN npm run build
 
 # Start the service
