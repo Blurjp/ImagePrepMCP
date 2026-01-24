@@ -3,4 +3,3 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "node dist/server.js --transport http --port $PORT"
-restartPolicyType = "ALWAYS"
