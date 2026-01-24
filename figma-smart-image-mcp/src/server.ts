@@ -1258,12 +1258,18 @@ You can manually extract design tokens by:
             const deviceCode = "device_" + Math.random().toString(36).substring(2, 15);
             const userCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
+            // Check if we have any OAuth tokens in Redis for auto-verification
+            const mostRecent = await sessionTokensStorage.getMostRecent();
+            const hasOAuthToken = !!mostRecent?.value?.token;
+
             // Store device code in Redis for later verification
+            // Auto-verify if we have a global token OR OAuth tokens exist
             await deviceCodesStorage.set(deviceCode, {
               userCode,
               clientId: clientId || "unknown",
               createdAt: Date.now(),
-              verified: !!this.figmaToken, // Auto-verify if token already exists
+              verified: !!this.figmaToken || hasOAuthToken,
+              figmaToken: hasOAuthToken ? mostRecent.value.token : this.figmaToken,
             });
 
             // Use Railway domain if available, otherwise from request host

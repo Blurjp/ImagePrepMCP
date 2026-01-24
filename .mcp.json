@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "figma-smart-image": {
+      "type": "http",
+      "url": "https://figma-smart-image-mcp-production.up.railway.app/mcp"
+    }
+  }
+}
