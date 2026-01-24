@@ -218,15 +218,6 @@ class FigmaSmartImageServer {
     const redis = getRedisClient();
     if (redis) {
       console.error(`[Server] Using Redis for multi-tenant storage`);
-      // Check for existing OAuth tokens on startup
-      sessionTokensStorage.getMostRecent().then(mostRecent => {
-        console.error(`[Server] Startup OAuth check: ${mostRecent ? `Found token for session ${mostRecent.key}` : 'No tokens found'}`);
-        if (mostRecent?.value?.token) {
-          console.error(`[Server] OAuth token exists: ${mostRecent.value.token.substring(0, 10)}...`);
-        }
-      }).catch(err => {
-        console.error(`[Server] Error checking OAuth tokens: ${err}`);
-      });
     } else {
       console.error(`[Server] REDIS_URL not set, using in-memory storage (single-instance only)`);
     }
