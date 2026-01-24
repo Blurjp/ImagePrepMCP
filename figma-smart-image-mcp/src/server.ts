@@ -1775,7 +1775,7 @@ You can manually extract design tokens by:
     params.append('redirect_uri', redirectUri);
     params.append('code_verifier', codeVerifier);
 
-    const response = await fetch('https://www.figma.com/oauth', {
+    const response = await fetch('https://api.figma.com/v1/oauth/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -1815,7 +1815,7 @@ You can manually extract design tokens by:
     params.append('grant_type', 'refresh_token');
     params.append('refresh_token', refreshToken);
 
-    const response = await fetch('https://www.figma.com/oauth', {
+    const response = await fetch('https://api.figma.com/v1/oauth/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
