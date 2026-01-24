@@ -7,8 +7,8 @@ import { mkdir } from "fs/promises";
 import { dirname } from "path";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-const svg2img = require("svg2img");
+const nodeRequire = createRequire(import.meta.url);
+const svg2img = nodeRequire("svg2img");
 export class ImageEncoder {
     /**
      * Encode an image to meet size constraints.

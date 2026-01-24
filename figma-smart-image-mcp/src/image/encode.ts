@@ -9,8 +9,8 @@ import { join, dirname } from "path";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 
-const require = createRequire(import.meta.url);
-const svg2img = require("svg2img");
+const nodeRequire = createRequire(import.meta.url);
+const svg2img = nodeRequire("svg2img");
 
 export interface EncodedImage {
   path: string;

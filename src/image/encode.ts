@@ -6,7 +6,11 @@
 import sharp from "sharp";
 import { mkdir } from "fs/promises";
 import { join, dirname } from "path";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
+import { createRequire } from "module";
+
+const nodeRequire = createRequire(import.meta.url);
+const svg2img = nodeRequire("svg2img");
 
 export interface EncodedImage {
   path: string;
@@ -182,6 +186,7 @@ export class ImageEncoder {
 
   /**
    * Convert SVG to PNG for processing.
+   * Uses svg2img library since Sharp doesn't support SVG.
    */
   async convertSvgToPng(
     svgPath: string,
@@ -192,16 +197,53 @@ export class ImageEncoder {
       await mkdir(dirname(pngPath), { recursive: true });
     }
 
-    const metadata = await sharp(svgPath).metadata();
-    const width = Math.round((metadata.width || 0) * scale);
-    const height = Math.round((metadata.height || 0) * scale);
+    // Read SVG content
+    const svgContent = readFileSync(svgPath, "utf-8");
 
-    await sharp(svgPath)
-      .resize(width, height)
-      .png()
-      .toFile(pngPath);
+    // Extract width and height from SVG
+    const widthMatch = svgContent.match(/width=["'](\d+(?:\.\d+)?)["']/);
+    const heightMatch = svgContent.match(/height=["'](\d+(?:\.\d+)?)["']/);
+    const viewBoxMatch = svgContent.match(/viewBox=["']([^"']+)["']/);
 
-    return { width, height };
+    let svgWidth = 0;
+    let svgHeight = 0;
+
+    if (widthMatch && heightMatch) {
+      svgWidth = parseFloat(widthMatch[1]);
+      svgHeight = parseFloat(heightMatch[1]);
+    } else if (viewBoxMatch) {
+      const [, , vbWidth, vbHeight] = viewBoxMatch[1].split(/\s+/).map(Number);
+      svgWidth = vbWidth || 1000;
+      svgHeight = vbHeight || 1000;
+    } else {
+      // Default size if not specified
+      svgWidth = 1000;
+      svgHeight = 1000;
+    }
+
+    const targetWidth = Math.round(svgWidth * scale);
+    const targetHeight = Math.round(svgHeight * scale);
+
+    // Convert SVG to PNG using svg2img
+    return new Promise((resolve, reject) => {
+      svg2img(svgContent, {
+        format: "png" as const,
+        resvg: {
+          fitTo: { mode: "zoom", value: scale }
+        }
+      }, (error: any, buffer: any) => {
+        if (error) {
+          reject(new Error(`Failed to convert SVG to PNG: ${error.message}`));
+          return;
+        }
+
+        // Write PNG buffer to file
+        const { writeFileSync } = require("fs");
+        writeFileSync(pngPath, buffer);
+
+        resolve({ width: targetWidth, height: targetHeight });
+      });
+    });
   }
 
   /**

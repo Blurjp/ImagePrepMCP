@@ -3,12 +3,12 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Copy package.json and install dependencies
-COPY package.json package-lock.json* ./
+COPY figma-smart-image-mcp/package.json figma-smart-image-mcp/package-lock.json* ./
 RUN npm install
 
 # Copy source files
-COPY src ./src
-COPY tsconfig.json ./
+COPY figma-smart-image-mcp/src ./src
+COPY figma-smart-image-mcp/tsconfig.json ./
 
 # Build the project
 RUN npm run build

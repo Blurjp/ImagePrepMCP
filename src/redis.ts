@@ -178,6 +178,28 @@ export const sessionTokensStorage = {
       return entries;
     }
     return Array.from(inMemorySessionTokens.entries());
+  },
+
+  async getMostRecent(): Promise<{ key: string; value: any } | null> {
+    console.log("[Redis] getMostRecent called");
+    const entries = await this.entries();
+    console.log(`[Redis] Found ${entries.length} session entries`);
+    if (entries.length === 0) {
+      console.log("[Redis] No entries found, returning null");
+      return null;
+    }
+
+    // Find the most recent session by createdAt timestamp
+    let mostRecent = entries[0];
+    console.log(`[Redis] First entry: key=${mostRecent[0]}, hasToken=${!!mostRecent[1]?.token}, createdAt=${mostRecent[1]?.createdAt}`);
+    for (const entry of entries) {
+      if (entry[1].createdAt > mostRecent[1].createdAt) {
+        mostRecent = entry;
+      }
+    }
+
+    console.log(`[Redis] Most recent: key=${mostRecent[0]}, hasToken=${!!mostRecent[1]?.token}`);
+    return { key: mostRecent[0], value: mostRecent[1] };
   }
 };
 
