@@ -1226,6 +1226,17 @@ You can manually extract design tokens by:
                     res.end(JSON.stringify({ persistence_dir: dir, info: info.substring(0, 500) }));
                     return;
                 }
+                if (debugAction === "sessions") {
+                    const activeSessions = Array.from(this.sessionTransports.keys());
+                    const globalSessions = Array.from(globalThis.activeTransports?.keys() || []);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({
+                        instanceSessions: activeSessions,
+                        globalSessions,
+                        count: activeSessions.length
+                    }));
+                    return;
+                }
                 const figmaUrl = url.searchParams.get("figma");
                 // If figma parameter provided, fetch the design
                 if (figmaUrl) {
