@@ -1704,11 +1704,16 @@ You can manually extract design tokens by:
 
           // Create SSE transport and connect to server
           const transport = new SSEServerTransport("/message", res);
-          await this.server.connect(transport);
-
-          // Store transport by session ID for multi-tenant support
+          // Store transport before connect to avoid race with initial endpoint event
           transports.set(transport.sessionId, transport);
           this.sessionTransports.set(transport.sessionId, transport);
+          try {
+            await this.server.connect(transport);
+          } catch (error) {
+            transports.delete(transport.sessionId);
+            this.sessionTransports.delete(transport.sessionId);
+            throw error;
+          }
 
           // Clean up when connection closes
           res.on("close", async () => {
@@ -1736,6 +1741,11 @@ You can manually extract design tokens by:
 
       // Message endpoint for POST requests from SSE client
       if (url.pathname === "/message" && req.method === "POST") {
+        // Ensure CORS headers for browser/desktop clients
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
         // Extract session ID from query string
         const sessionId = url.searchParams.get("sessionId");
         if (!sessionId) {

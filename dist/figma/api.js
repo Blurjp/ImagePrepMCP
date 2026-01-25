@@ -136,5 +136,126 @@ export class FigmaApiClient {
             throw new Error(`Failed to get node info: ${error}`);
         }
     }
+    /**
+     * Get all components from the file
+     */
+    async getComponents(fileKey) {
+        const fileInfo = await this.getFileInfo(fileKey);
+        const components = [];
+        // Components are at top level in the response
+        if (fileInfo.components) {
+            for (const [key, comp] of Object.entries(fileInfo.components)) {
+                components.push({
+                    key: key,
+                    name: comp.name,
+                    description: comp.description || '',
+                    componentSetId: comp.componentSetId,
+                    documentationLinks: comp.documentationLinks || []
+                });
+            }
+        }
+        return components;
+    }
+    /**
+     * Get component sets (variants) from the file
+     */
+    async getComponentSets(fileKey) {
+        const fileInfo = await this.getFileInfo(fileKey);
+        const componentSets = [];
+        if (fileInfo.componentSets) {
+            for (const [key, compSet] of Object.entries(fileInfo.componentSets)) {
+                componentSets.push({
+                    key: key,
+                    name: compSet.name,
+                    description: compSet.description || ''
+                });
+            }
+        }
+        return componentSets;
+    }
+    /**
+     * Get detailed node properties including layout, fills, effects
+     */
+    async getNodeDetails(fileKey, nodeId) {
+        const fileInfo = await this.getFileInfo(fileKey);
+        // Traverse document tree to find the node
+        const node = this.findNodeInTree(fileInfo.document, nodeId);
+        if (!node) {
+            throw new Error(`Node ${nodeId} not found in file`);
+        }
+        return {
+            id: node.id,
+            name: node.name,
+            type: node.type,
+            // Layout properties
+            absoluteBoundingBox: node.absoluteBoundingBox,
+            constraints: node.constraints,
+            layoutMode: node.layoutMode,
+            primaryAxisSizingMode: node.primaryAxisSizingMode,
+            counterAxisSizingMode: node.counterAxisSizingMode,
+            paddingLeft: node.paddingLeft,
+            paddingRight: node.paddingRight,
+            paddingTop: node.paddingTop,
+            paddingBottom: node.paddingBottom,
+            itemSpacing: node.itemSpacing,
+            // Visual properties
+            fills: node.fills || [],
+            strokes: node.strokes || [],
+            effects: node.effects || [],
+            opacity: node.opacity,
+            blendMode: node.blendMode,
+            // Text properties (if text node)
+            characters: node.characters,
+            style: node.style,
+            // Children (basic info only)
+            children: node.children?.map((c) => ({
+                id: c.id,
+                name: c.name,
+                type: c.type
+            }))
+        };
+    }
+    /**
+     * Helper method to find a node in the document tree by ID
+     */
+    findNodeInTree(node, targetId) {
+        if (node.id === targetId) {
+            return node;
+        }
+        if (node.children) {
+            for (const child of node.children) {
+                const found = this.findNodeInTree(child, targetId);
+                if (found)
+                    return found;
+            }
+        }
+        return null;
+    }
+    /**
+     * Get local variables from the file
+     * NOTE: This requires a different API endpoint than getFileInfo()
+     */
+    async getVariables(fileKey) {
+        const url = `${this.baseUrl}/files/${fileKey}/variables/local`;
+        try {
+            const response = await request(url, {
+                headers: {
+                    "X-Figma-Token": this.accessToken,
+                },
+            });
+            if (response.statusCode !== 200) {
+                const body = await response.body.text();
+                throw new FigmaApiError(body.err || `Failed to get variables (status ${response.statusCode})`, response.statusCode, body.code);
+            }
+            const data = await response.body.json();
+            return data;
+        }
+        catch (error) {
+            if (error instanceof FigmaApiError) {
+                throw error;
+            }
+            throw new Error(`Failed to get variables: ${error}`);
+        }
+    }
 }
 //# sourceMappingURL=api.js.map

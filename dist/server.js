@@ -15,8 +15,7 @@ import { z } from "zod";
 import { createServer as createHttpServer } from "http";
 import { URL } from "url";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
 import { homedir } from "os";
 import { FigmaLinkParser } from "./figma/parse_link.js";
 import { FigmaApiClient } from "./figma/api.js";
@@ -38,6 +37,15 @@ const ProcessFigmaLinkInputSchema = z.object({
     force_source_format: z.enum(["auto", "svg", "png"]).optional(),
     include_crops: z.boolean().optional(),
 });
+const GetFigmaComponentsInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL"),
+});
+const GetFigmaNodeDetailsInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL with node-id"),
+});
+const GetFigmaVariablesInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL"),
+});
 // Default constants
 const DEFAULT_MAX_BYTES = 4_000_000; // 4MB
 const DEFAULT_MAX_LONG_EDGE = 4096;
@@ -49,9 +57,15 @@ const DEFAULT_INCLUDE_CROPS = false;
 const TRANSPORT_MODE = (process.env.TRANSPORT_MODE || parseArg("--transport") || "stdio");
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || parseArg("--port") || "3845", 10);
 function parseArg(argName) {
+    // First try space-separated format: --transport http
     const argIndex = process.argv.findIndex((arg) => arg === argName);
     if (argIndex !== -1 && argIndex + 1 < process.argv.length) {
         return process.argv[argIndex + 1];
+    }
+    // Then try equals format: --transport=http
+    const equalsArg = process.argv.find((arg) => arg.startsWith(argName + "="));
+    if (equalsArg) {
+        return equalsArg.split("=")[1];
     }
     return undefined;
 }
@@ -183,13 +197,10 @@ class FigmaSmartImageServer {
     }
     /**
      * Get token for a specific session
-     * Returns session token if available, otherwise falls back to:
-     * 1. Most recent OAuth token from Redis
-     * 2. Device codes (for OAuth flow)
-     * 3. Global token
+     * Returns session token if available, otherwise falls back to most recent OAuth token, then global token
      */
     async getTokenForSession(sessionId) {
-        // Check session tokens in Redis
+        // Check session tokens in Redis for this specific session
         const sessionData = await sessionTokensStorage.get(sessionId);
         if (sessionData?.token) {
             return sessionData.token;
@@ -199,16 +210,13 @@ class FigmaSmartImageServer {
         if (deviceData?.figmaToken) {
             return deviceData.figmaToken;
         }
-        // Fall back to most recent OAuth token if no session-specific token found
-        const oauthEntries = await sessionTokensStorage.entries();
-        const oauthEntriesArray = Array.from(oauthEntries);
-        if (oauthEntriesArray.length > 0) {
-            // Get the most recent OAuth token (last entry)
-            const mostRecentSession = oauthEntriesArray[oauthEntriesArray.length - 1];
-            if (mostRecentSession[1]?.token) {
-                return mostRecentSession[1].token;
-            }
+        // Fall back to most recent OAuth token from any session
+        const mostRecent = await sessionTokensStorage.getMostRecent();
+        if (mostRecent?.value?.token) {
+            console.error(`[Auth] Using most recent OAuth token for session ${sessionId}`);
+            return mostRecent.value.token;
         }
+        // Fall back to global token (for local dev)
         return this.figmaToken;
     }
     /**
@@ -252,12 +260,60 @@ class FigmaSmartImageServer {
                             required: ["url"],
                         },
                     },
+                    {
+                        name: "get_figma_components",
+                        description: "Get all components and component sets from a Figma file. " +
+                            "Returns component definitions with their names, descriptions, and keys. " +
+                            "Useful for understanding the design system and generating code that uses these components.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma file URL" },
+                            },
+                            required: ["url"],
+                        },
+                    },
+                    {
+                        name: "get_figma_node_details",
+                        description: "Get detailed layout and styling information for a specific Figma node. " +
+                            "Returns properties like auto-layout settings, padding, spacing, fills, effects, " +
+                            "and constraints. Essential for accurate code generation.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma URL with node-id parameter" },
+                            },
+                            required: ["url"],
+                        },
+                    },
+                    {
+                        name: "get_figma_variables",
+                        description: "Get design variables (colors, spacing, typography) from a Figma file. " +
+                            "Returns local variables and their values across different modes. " +
+                            "Use this to extract design tokens for your design system.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma file URL" },
+                            },
+                            required: ["url"],
+                        },
+                    },
                 ],
             };
         });
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             if (request.params.name === "process_figma_link") {
                 return await this.handleProcessFigmaLink(request.params.arguments);
+            }
+            if (request.params.name === "get_figma_components") {
+                return await this.handleGetFigmaComponents(request.params.arguments);
+            }
+            if (request.params.name === "get_figma_node_details") {
+                return await this.handleGetFigmaNodeDetails(request.params.arguments);
+            }
+            if (request.params.name === "get_figma_variables") {
+                return await this.handleGetFigmaVariables(request.params.arguments);
             }
             throw new Error(`Unknown tool: ${request.params.name}`);
         });
@@ -513,6 +569,295 @@ class FigmaSmartImageServer {
             };
         }
     }
+    async handleGetFigmaComponents(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            // Parse Figma URL
+            const parsed = FigmaLinkParser.parse(args.url);
+            const api = new FigmaApiClient(token);
+            // Get components and component sets
+            const components = await api.getComponents(parsed.fileKey);
+            const componentSets = await api.getComponentSets(parsed.fileKey);
+            // Format output
+            let output = `# Components from Figma File\n\n`;
+            output += `File: ${parsed.fileKey}\n\n`;
+            if (componentSets.length > 0) {
+                output += `## Component Sets (${componentSets.length})\n\n`;
+                componentSets.forEach(set => {
+                    output += `### ${set.name}\n`;
+                    if (set.description) {
+                        output += `${set.description}\n`;
+                    }
+                    output += `Key: ${set.key}\n\n`;
+                });
+            }
+            if (components.length > 0) {
+                output += `## Components (${components.length})\n\n`;
+                components.forEach(comp => {
+                    output += `### ${comp.name}\n`;
+                    if (comp.description) {
+                        output += `${comp.description}\n`;
+                    }
+                    output += `Key: ${comp.key}\n`;
+                    if (comp.componentSetId) {
+                        output += `Component Set ID: ${comp.componentSetId}\n`;
+                    }
+                    if (comp.documentationLinks.length > 0) {
+                        output += `Documentation: ${comp.documentationLinks.join(', ')}\n`;
+                    }
+                    output += `\n`;
+                });
+            }
+            else {
+                output += `No components found in this file.\n`;
+            }
+            // Also return raw JSON
+            output += `\n---\n\n## Raw JSON Data\n\n\`\`\`json\n`;
+            output += JSON.stringify({ components, componentSets }, null, 2);
+            output += `\n\`\`\`\n`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: output,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleGetFigmaNodeDetails(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            // Parse Figma URL
+            const parsed = FigmaLinkParser.parse(args.url);
+            if (!parsed.nodeId) {
+                throw new Error("Node ID is required. Please provide a Figma URL with node-id parameter.");
+            }
+            const api = new FigmaApiClient(token);
+            // Get node details
+            const details = await api.getNodeDetails(parsed.fileKey, parsed.nodeId);
+            // Format output
+            let output = `# Node Details: ${details.name}\n\n`;
+            output += `Type: ${details.type}\n`;
+            output += `ID: ${details.id}\n\n`;
+            // Layout properties
+            if (details.absoluteBoundingBox) {
+                output += `## Bounding Box\n`;
+                output += `- Position: (${details.absoluteBoundingBox.x}, ${details.absoluteBoundingBox.y})\n`;
+                output += `- Size: ${details.absoluteBoundingBox.width} × ${details.absoluteBoundingBox.height}\n\n`;
+            }
+            if (details.layoutMode) {
+                output += `## Auto Layout\n`;
+                output += `- Layout Mode: ${details.layoutMode}\n`;
+                if (details.primaryAxisSizingMode) {
+                    output += `- Primary Axis: ${details.primaryAxisSizingMode}\n`;
+                }
+                if (details.counterAxisSizingMode) {
+                    output += `- Counter Axis: ${details.counterAxisSizingMode}\n`;
+                }
+                if (details.itemSpacing !== undefined) {
+                    output += `- Item Spacing: ${details.itemSpacing}px\n`;
+                }
+                if (details.paddingLeft !== undefined) {
+                    output += `- Padding: ${details.paddingTop || 0}px ${details.paddingRight || 0}px ${details.paddingBottom || 0}px ${details.paddingLeft || 0}px\n`;
+                }
+                output += `\n`;
+            }
+            // Visual properties
+            if (details.fills && details.fills.length > 0) {
+                output += `## Fills (${details.fills.length})\n`;
+                details.fills.forEach((fill, i) => {
+                    output += `${i + 1}. ${fill.type || 'UNKNOWN'}\n`;
+                });
+                output += `\n`;
+            }
+            if (details.effects && details.effects.length > 0) {
+                output += `## Effects (${details.effects.length})\n`;
+                details.effects.forEach((effect, i) => {
+                    output += `${i + 1}. ${effect.type || 'UNKNOWN'}\n`;
+                });
+                output += `\n`;
+            }
+            if (details.opacity !== undefined && details.opacity !== 1) {
+                output += `## Opacity\n${(details.opacity * 100).toFixed(0)}%\n\n`;
+            }
+            // Text properties
+            if (details.characters) {
+                output += `## Text Content\n`;
+                output += `"${details.characters}"\n\n`;
+            }
+            // Children
+            if (details.children && details.children.length > 0) {
+                output += `## Children (${details.children.length})\n`;
+                details.children.forEach(child => {
+                    output += `- ${child.name} (${child.type})\n`;
+                });
+                output += `\n`;
+            }
+            // Raw JSON
+            output += `\n---\n\n## Raw JSON Data\n\n\`\`\`json\n`;
+            output += JSON.stringify(details, null, 2);
+            output += `\n\`\`\`\n`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: output,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleGetFigmaVariables(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            // Parse Figma URL
+            const parsed = FigmaLinkParser.parse(args.url);
+            const api = new FigmaApiClient(token);
+            // Get variables
+            const variablesData = await api.getVariables(parsed.fileKey);
+            // Format output
+            let output = `# Design Variables\n\n`;
+            output += `File: ${parsed.fileKey}\n\n`;
+            const { variables, variableCollections } = variablesData.meta;
+            // Collections
+            const collectionsList = Object.values(variableCollections);
+            if (collectionsList.length > 0) {
+                output += `## Collections (${collectionsList.length})\n\n`;
+                collectionsList.forEach(collection => {
+                    output += `### ${collection.name}\n`;
+                    output += `ID: ${collection.id}\n`;
+                    if (collection.modes.length > 0) {
+                        output += `Modes: ${collection.modes.map(m => m.name).join(', ')}\n`;
+                    }
+                    output += `\n`;
+                });
+            }
+            // Variables
+            const variablesList = Object.values(variables);
+            if (variablesList.length > 0) {
+                output += `## Variables (${variablesList.length})\n\n`;
+                // Group by type
+                const byType = {};
+                variablesList.forEach(v => {
+                    if (!byType[v.resolvedType]) {
+                        byType[v.resolvedType] = [];
+                    }
+                    byType[v.resolvedType].push(v);
+                });
+                Object.entries(byType).forEach(([type, vars]) => {
+                    output += `### ${type} (${vars.length})\n\n`;
+                    vars.forEach(v => {
+                        output += `**${v.name}**\n`;
+                        if (v.description) {
+                            output += `${v.description}\n`;
+                        }
+                        output += `ID: ${v.id}\n`;
+                        output += `Values: ${JSON.stringify(v.valuesByMode)}\n`;
+                        output += `\n`;
+                    });
+                });
+            }
+            else {
+                output += `No variables found in this file.\n`;
+            }
+            // Raw JSON
+            output += `\n---\n\n## Raw JSON Data\n\n\`\`\`json\n`;
+            output += JSON.stringify(variablesData, null, 2);
+            output += `\n\`\`\`\n`;
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: output,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            // Check if it's a 403 error (Starter Plan doesn't support Variables API)
+            if (errorMessage.includes("403") || errorMessage.includes("Forbidden")) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `# Figma Variables API - Not Available
+
+This Figma file's variables cannot be accessed because the **Figma Variables API requires a Professional Plan or higher**.
+
+## What this means:
+- Your current Figma plan (Starter) doesn't support access to design variables via API
+- The Variables API endpoint returns a 403 Forbidden error
+
+## Alternatives:
+1. **Upgrade to Figma Professional** - Get full API access to variables
+2. **Use other MCP tools** - You can still use:
+   - \`get_figma_components\` - Get component definitions ✅
+   - \`get_figma_node_details\` - Get node layout and styling ✅
+   - \`process_figma_link\` - Export and process designs ✅
+
+## For design tokens:
+You can manually extract design tokens by:
+- Using \`get_figma_node_details\` on specific frames to see colors and spacing
+- Exporting the design as images and analyzing them
+- Using Figma's "Inspect" panel in the Figma app
+
+**Note:** Other Figma MCP tools work normally with your current plan.
+`,
+                        },
+                    ],
+                    isError: false, // Not a hard error, just a limitation
+                };
+            }
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
     async runStdio() {
         if (!this.figmaToken) {
             throw new Error("FIGMA_TOKEN environment variable is required. " +
@@ -566,7 +911,8 @@ class FigmaSmartImageServer {
                     baseUrl = process.env.RAILWAY_STATIC_URL;
                 }
                 else if (req.headers.host) {
-                    const protocol = req.headers['x-forwarded-proto'] || 'http';
+                    // Use request host header - prefer x-forwarded-proto for Railway/proxy deployments
+                    const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
                     baseUrl = `${protocol}://${req.headers.host}`;
                 }
                 else {
@@ -578,7 +924,7 @@ class FigmaSmartImageServer {
                     authorization_endpoint: `${baseUrl}/`,
                     token_endpoint: `${baseUrl}/oauth/token`,
                     registration_endpoint: `${baseUrl}/register`,
-                    device_authorization_endpoint: `${baseUrl}/oauth/device_authorization`,
+                    device_authorization_endpoint: `${baseUrl}/device/authorize`,
                     response_types_supported: ["code"],
                     grant_types_supported: ["authorization_code", "urn:ietf:params:oauth:grant-type:device_code"],
                     code_challenge_methods_supported: ["S256"],
@@ -588,9 +934,17 @@ class FigmaSmartImageServer {
             }
             // OAuth device authorization endpoint - returns info about web auth
             if (url.pathname === "/oauth/device_authorization" && req.method === "POST") {
-                const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-                    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-                    : `http://localhost:${port}`;
+                let baseUrl;
+                if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+                    baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+                }
+                else if (req.headers.host) {
+                    const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
+                    baseUrl = `${protocol}://${req.headers.host}`;
+                }
+                else {
+                    baseUrl = `http://localhost:${port}`;
+                }
                 res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
                 res.end(JSON.stringify({
                     device_code: "web_auth",
@@ -612,7 +966,9 @@ class FigmaSmartImageServer {
                     const deviceCode = params.get("device_code");
                     // Device code flow polling
                     if (grantType === "urn:ietf:params:oauth:grant-type:device_code") {
+                        console.error(`[OAuth] Device code flow started for: ${deviceCode || '(missing)'}`);
                         if (!deviceCode) {
+                            console.error(`[OAuth] ERROR: Missing device_code`);
                             res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                             res.end(JSON.stringify({
                                 error: "invalid_grant",
@@ -620,14 +976,45 @@ class FigmaSmartImageServer {
                             }));
                             return;
                         }
-                        // Check sessionTokens first (more reliable than deviceCodes)
+                        // TEMPORARY: Auto-approve "web_auth" if OAuth tokens exist
+                        if (deviceCode === "web_auth") {
+                            console.error(`[OAuth] web_auth detected - checking for OAuth tokens`);
+                            const mostRecent = await sessionTokensStorage.getMostRecent();
+                            console.error(`[OAuth] mostRecent result: ${mostRecent ? 'found' : 'null'}`);
+                            if (mostRecent?.value?.token) {
+                                console.error(`[OAuth] SUCCESS: Returning access token for web_auth`);
+                                res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+                                res.end(JSON.stringify({
+                                    access_token: deviceCode,
+                                    token_type: "Bearer",
+                                    expires_in: 3600,
+                                }));
+                                return;
+                            }
+                        }
+                        console.error(`[OAuth] Checking auth for device code: ${deviceCode}`);
+                        // Check sessionTokens first (specific to this device code)
                         const sessionToken = await sessionTokensStorage.get(deviceCode);
+                        console.error(`[OAuth] sessionToken result: ${sessionToken ? 'found' : 'not found'}`);
                         let hasAuthenticated = !!sessionToken;
                         // If not in sessionTokens, try deviceCodes
                         let deviceInfo = null;
                         if (!hasAuthenticated) {
                             deviceInfo = await deviceCodesStorage.get(deviceCode);
                             hasAuthenticated = deviceInfo?.verified && (deviceInfo?.figmaToken || this.figmaToken);
+                        }
+                        // If still not authenticated, check for ANY recent OAuth token
+                        if (!hasAuthenticated) {
+                            console.error(`[OAuth Debug] Checking for recent OAuth tokens for device code: ${deviceCode}`);
+                            const mostRecent = await sessionTokensStorage.getMostRecent();
+                            console.error(`[OAuth Debug] getMostRecent result:`, mostRecent ? `Found (createdAt: ${mostRecent.value?.createdAt}, hasToken: ${!!mostRecent.value?.token})` : 'null');
+                            if (mostRecent?.value?.token) {
+                                console.error(`[OAuth Token] Using most recent OAuth token for device code ${deviceCode}`);
+                                hasAuthenticated = true;
+                            }
+                            else {
+                                console.error(`[OAuth Debug] No valid OAuth token found`);
+                            }
                         }
                         if (hasAuthenticated) {
                             // User has authenticated - return success
@@ -638,6 +1025,34 @@ class FigmaSmartImageServer {
                                 expires_in: 3600,
                             }));
                             return;
+                        }
+                        // For the hardcoded "web_auth" device code, auto-create it if we have OAuth tokens
+                        if (deviceCode === "web_auth") {
+                            console.error(`[OAuth] Checking for most recent OAuth token...`);
+                            const mostRecent = await sessionTokensStorage.getMostRecent();
+                            console.error(`[OAuth] getMostRecent result:`, mostRecent ? `Found token (${mostRecent.value?.token?.substring(0, 20)}...)` : 'null');
+                            if (mostRecent?.value?.token) {
+                                console.error(`[OAuth] Auto-creating web_auth device code with OAuth token`);
+                                // Auto-create device code entry for web_auth
+                                await deviceCodesStorage.set(deviceCode, {
+                                    userCode: "WEB",
+                                    clientId: "web",
+                                    createdAt: Date.now(),
+                                    verified: true,
+                                    figmaToken: mostRecent.value.token,
+                                });
+                                // Return success immediately
+                                res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+                                res.end(JSON.stringify({
+                                    access_token: deviceCode,
+                                    token_type: "Bearer",
+                                    expires_in: 3600,
+                                }));
+                                return;
+                            }
+                            else {
+                                console.error(`[OAuth] No OAuth tokens found - cannot auto-create web_auth`);
+                            }
                         }
                         // Check if device code exists at all
                         const deviceExists = await deviceCodesStorage.get(deviceCode) || sessionToken;
@@ -650,10 +1065,21 @@ class FigmaSmartImageServer {
                             return;
                         }
                         // Still waiting for user to authenticate
+                        let authUrl;
+                        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+                            authUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+                        }
+                        else if (req.headers.host) {
+                            const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
+                            authUrl = `${protocol}://${req.headers.host}`;
+                        }
+                        else {
+                            authUrl = `http://localhost:${port}`;
+                        }
                         res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
                         res.end(JSON.stringify({
                             error: "authorization_pending",
-                            error_description: "Please visit " + (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${port}`) + "/ to authenticate with your Figma token",
+                            error_description: `Please visit ${authUrl}/ to authenticate with your Figma token`,
                         }));
                         return;
                     }
@@ -678,17 +1104,32 @@ class FigmaSmartImageServer {
                         // Generate a device code for this authorization request
                         const deviceCode = "device_" + Math.random().toString(36).substring(2, 15);
                         const userCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+                        // Check if we have any OAuth tokens in Redis for auto-verification
+                        console.error("[Device/Authorize] Checking for existing OAuth tokens...");
+                        const mostRecent = await sessionTokensStorage.getMostRecent();
+                        const hasOAuthToken = !!mostRecent?.value?.token;
+                        console.error(`[Device/Authorize] hasOAuthToken: ${hasOAuthToken}`);
                         // Store device code in Redis for later verification
+                        // Auto-verify if we have a global token OR OAuth tokens exist
                         await deviceCodesStorage.set(deviceCode, {
                             userCode,
                             clientId: clientId || "unknown",
                             createdAt: Date.now(),
-                            verified: !!this.figmaToken, // Auto-verify if token already exists
+                            verified: !!this.figmaToken || hasOAuthToken,
+                            figmaToken: hasOAuthToken ? mostRecent.value.token : this.figmaToken,
                         });
-                        // Use Railway domain if available, otherwise localhost
-                        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-                            ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-                            : `http://localhost:${port}`;
+                        // Use Railway domain if available, otherwise from request host
+                        let baseUrl;
+                        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+                            baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+                        }
+                        else if (req.headers.host) {
+                            const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
+                            baseUrl = `${protocol}://${req.headers.host}`;
+                        }
+                        else {
+                            baseUrl = `http://localhost:${port}`;
+                        }
                         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
                         res.end(JSON.stringify({
                             device_code: deviceCode,
@@ -720,194 +1161,165 @@ class FigmaSmartImageServer {
                 }));
                 return;
             }
-            // Health check endpoint
-            if (url.pathname === "/health") {
+            // Debug endpoint for Redis persistence testing
+            if (url.pathname === "/debug/redis-test") {
                 const redis = getRedisClient();
+                if (!redis) {
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Redis not available" }));
+                    return;
+                }
+                const action = url.searchParams.get("action");
+                if (action === "set") {
+                    await redis.set("persist_probe", "ok");
+                    await redis.save();
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ status: "SET persist_probe=ok and called SAVE" }));
+                    return;
+                }
+                if (action === "get") {
+                    const value = await redis.get("persist_probe");
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ persist_probe: value, exists: !!value }));
+                    return;
+                }
+                if (action === "info") {
+                    const info = await redis.info("persistence");
+                    const dir = await redis.config("GET", "dir");
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ persistence_config: dir, info: info }));
+                    return;
+                }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    usage: "Use ?action=set|get|info",
+                    actions: {
+                        set: "SET persist_probe 'ok' and call SAVE",
+                        get: "GET persist_probe value",
+                        info: "Show Redis persistence configuration"
+                    }
+                }));
+                return;
+            }
+            // Health check endpoint (with optional Figma fetch)
+            if (url.pathname === "/health") {
+                // Debug: Redis persistence test
+                const debugAction = url.searchParams.get("debug");
+                const redis = getRedisClient();
+                if (redis && debugAction === "set_probe") {
+                    await redis.set("persist_probe", "ok");
+                    await redis.save();
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ status: "SET persist_probe=ok and called SAVE" }));
+                    return;
+                }
+                if (redis && debugAction === "get_probe") {
+                    const value = await redis.get("persist_probe");
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ persist_probe: value, exists: !!value }));
+                    return;
+                }
+                if (redis && debugAction === "redis_info") {
+                    const info = await redis.info("persistence");
+                    const dir = await redis.config("GET", "dir");
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ persistence_dir: dir, info: info.substring(0, 500) }));
+                    return;
+                }
+                const figmaUrl = url.searchParams.get("figma");
+                // If figma parameter provided, fetch the design
+                if (figmaUrl) {
+                    const mostRecent = await sessionTokensStorage.getMostRecent();
+                    const token = mostRecent?.value?.token || this.figmaToken;
+                    if (!token) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "No Figma token available" }));
+                        return;
+                    }
+                    try {
+                        const result = await this.handleProcessFigmaLink({
+                            url: figmaUrl,
+                            _meta: { sessionId: "health_api" }
+                        });
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    catch (error) {
+                        res.writeHead(500, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+                        return;
+                    }
+                }
+                // Normal health check
                 const deviceCodeKeys = await deviceCodesStorage.keys();
-                // Check for OAuth tokens in Redis
-                const oauthSessions = await sessionTokensStorage.entries();
-                const oauthSessionsArray = Array.from(oauthSessions);
-                const hasOAuthToken = oauthSessionsArray.length > 0;
+                const mostRecentOAuth = await sessionTokensStorage.getMostRecent();
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({
                     status: "ok",
-                    hasToken: !!this.figmaToken || hasOAuthToken,
+                    hasToken: !!this.figmaToken,
                     hasDefaultToken: !!this.figmaToken,
-                    hasOAuthToken: hasOAuthToken,
-                    oauthSessionCount: oauthSessionsArray.length,
+                    hasOAuthToken: !!mostRecentOAuth?.value?.token,
+                    oauthSessionCount: (await sessionTokensStorage.entries()).length,
                     redis: redis ? "connected" : "disconnected (using in-memory fallback)",
                     activeDevices: deviceCodeKeys.length,
                     activeTransports: this.sessionTransports.size,
                 }));
                 return;
             }
-            // Debug endpoint - check OAuth configuration
-            if (url.pathname === "/debug") {
-                const clientId = process.env.FIGMA_CLIENT_ID;
-                const clientSecret = process.env.FIGMA_CLIENT_SECRET;
-                const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN;
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({
-                    oauth: {
-                        clientId: clientId ? `${clientId.slice(0, 8)}...` : "NOT_SET",
-                        clientSecret: clientSecret ? `${clientSecret.slice(0, 8)}... (length: ${clientSecret.length})` : "NOT_SET",
-                        railwayDomain: railwayDomain || "NOT_SET",
-                        redirectUri: railwayDomain ? `https://${railwayDomain}/oauth/callback` : "NOT_SET",
-                    },
-                    config: {
-                        hasClientId: !!clientId,
-                        hasClientSecret: !!clientSecret,
-                        clientSecretLength: clientSecret?.length || 0,
-                    },
-                }, null, 2));
-                return;
+            // Direct Figma fetch endpoint (bypasses MCP)
+            if (url.pathname.startsWith("/api")) {
+                console.error(`[API] Request: ${req.method} ${url.pathname}`);
             }
-            // Debug logs endpoint - check recent OAuth logs
-            if (url.pathname === "/debug/logs") {
-                const recentLogs = [];
-                const maxLogs = 50;
-                // Try to read from a log file if it exists
-                try {
-                    const { existsSync, readFileSync } = await import('fs');
-                    const logPath = '/tmp/oauth-logs.txt';
-                    if (existsSync(logPath)) {
-                        const logContent = readFileSync(logPath, 'utf-8');
-                        const lines = logContent.split('\n').filter(l => l.includes('[OAuth'));
-                        recentLogs.push(...lines.slice(-maxLogs));
-                    }
-                }
-                catch { }
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({
-                    logs: recentLogs,
-                    note: recentLogs.length === 0 ? "No OAuth logs found. Complete OAuth flow to see logs." : `Last ${recentLogs.length} OAuth-related log entries`,
-                }, null, 2));
-                return;
-            }
-            // Debug sessions endpoint - check stored OAuth sessions
-            if (url.pathname === "/debug/sessions") {
-                const entries = await sessionTokensStorage.entries();
-                const entriesArray = Array.from(entries);
-                const sessionInfo = entriesArray.map(([key, value]) => ({
-                    sessionId: key.substring(0, 8) + '...',
-                    hasToken: !!value?.token,
-                    tokenLength: value?.token?.length || 0,
-                    tokenPreview: value?.token ? value.token.substring(0, 20) + '...' : 'N/A',
-                    hasRefreshToken: !!value?.refreshToken,
-                    email: value?.email || 'N/A',
-                    createdAt: value?.createdAt ? new Date(value.createdAt).toISOString() : 'N/A',
-                    expiresAt: value?.expiresAt ? new Date(value.expiresAt).toISOString() : 'N/A',
-                }));
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({
-                    totalSessions: entriesArray.length,
-                    sessions: sessionInfo,
-                }, null, 2));
-                return;
-            }
-            // Clear sessions endpoint - remove all stored OAuth sessions
-            if (url.pathname === "/debug/sessions/clear" && req.method === "POST") {
-                const entries = await sessionTokensStorage.entries();
-                const entriesArray = Array.from(entries);
-                for (const [key] of entriesArray) {
-                    await sessionTokensStorage.delete(key);
-                }
-                console.log(`[Debug] Cleared ${entriesArray.length} OAuth sessions`);
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({
-                    cleared: entriesArray.length,
-                    message: `Cleared ${entriesArray.length} OAuth sessions. Please complete OAuth flow again.`
-                }));
-                return;
-            }
-            // Public API endpoint to fetch Figma designs using stored OAuth token
-            if (url.pathname === "/api/figma/fetch" && req.method === "GET") {
+            if (url.pathname === "/api/fetch-figma" && req.method === "GET") {
+                console.error(`[API] Fetching Figma design...`);
                 const figmaUrl = url.searchParams.get("url");
                 if (!figmaUrl) {
                     res.writeHead(400, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ error: "Missing 'url' parameter" }));
+                    res.end(JSON.stringify({ error: "Missing url parameter" }));
                     return;
                 }
-                // Extract file key from Figma URL
-                // Supports: /design/{key}, /file/{key}, /proto/{key}
-                const urlMatch = figmaUrl.match(/figma\.com\/(?:design|file|proto)\/([a-zA-Z0-9]+)/);
-                if (!urlMatch) {
-                    res.writeHead(400, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({ error: "Invalid Figma URL format" }));
+                // Get most recent OAuth token
+                const mostRecent = await sessionTokensStorage.getMostRecent();
+                const token = mostRecent?.value?.token || this.figmaToken;
+                if (!token) {
+                    res.writeHead(401, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "No Figma token available" }));
                     return;
                 }
-                const fileKey = urlMatch[1];
                 try {
-                    // Get the most recent OAuth token from Redis
-                    const entries = await sessionTokensStorage.entries();
-                    const entriesArray = Array.from(entries);
-                    if (entriesArray.length === 0) {
-                        res.writeHead(401, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({
-                            error: "No OAuth token found. Please authenticate at /auth first."
-                        }));
-                        return;
-                    }
-                    // Get the most recent token (last entry)
-                    const mostRecentSession = entriesArray[entriesArray.length - 1];
-                    const sessionData = mostRecentSession[1];
-                    if (!sessionData?.token) {
-                        res.writeHead(401, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({ error: "Invalid session data" }));
-                        return;
-                    }
-                    // Fetch the design from Figma API
-                    // OAuth tokens use "Authorization: Bearer" header (not X-Figma-Token)
-                    const figmaResponse = await fetch(`https://api.figma.com/v1/files/${fileKey}`, {
-                        headers: {
-                            "Authorization": `Bearer ${sessionData.token}`,
-                        },
+                    // Parse and process the Figma URL
+                    const result = await this.handleProcessFigmaLink({
+                        url: figmaUrl,
+                        _meta: { sessionId: "direct_api" }
                     });
-                    if (!figmaResponse.ok) {
-                        const errorText = await figmaResponse.text();
-                        console.error("Figma API error:", figmaResponse.status, errorText);
-                        res.writeHead(figmaResponse.status, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({
-                            error: `Figma API error: ${figmaResponse.status}`,
-                            details: errorText
-                        }));
-                        return;
-                    }
-                    const designData = await figmaResponse.json();
                     res.writeHead(200, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify(designData, null, 2));
+                    res.end(JSON.stringify(result));
                 }
                 catch (error) {
-                    console.error("Error fetching Figma design:", error);
                     res.writeHead(500, { "Content-Type": "application/json" });
-                    res.end(JSON.stringify({
-                        error: "Failed to fetch design",
-                        details: error instanceof Error ? error.message : String(error)
-                    }));
+                    res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
                 }
+                return;
+            }
+            // Debug endpoint to check environment
+            if (url.pathname === "/debug/env") {
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({
+                    RAILWAY_PUBLIC_DOMAIN: process.env.RAILWAY_PUBLIC_DOMAIN || null,
+                    RAILWAY_STATIC_URL: process.env.RAILWAY_STATIC_URL || null,
+                    PORT: process.env.PORT || null,
+                    requestHost: req.headers.host || null,
+                    xForwardedProto: req.headers['x-forwarded-proto'] || null,
+                    nodeVersion: process.version,
+                }));
                 return;
             }
             // Authentication page
-            if (url.pathname === "/auth") {
+            if (url.pathname === "/") {
                 res.writeHead(200, { "Content-Type": "text/html" });
                 const hasOAuth = !!(process.env.FIGMA_CLIENT_ID);
                 res.end(this.getAuthPage(hasOAuth));
-                return;
-            }
-            // Landing page
-            if (url.pathname === "/") {
-                res.writeHead(200, { "Content-Type": "text/html" });
-                try {
-                    const __filename = fileURLToPath(import.meta.url);
-                    const __dirname = dirname(__filename);
-                    const landingPage = readFileSync(join(__dirname, "public/index.html"), "utf-8");
-                    res.end(landingPage);
-                }
-                catch {
-                    // Fallback to auth page if landing page not found
-                    const hasOAuth = !!(process.env.FIGMA_CLIENT_ID);
-                    res.end(this.getAuthPage(hasOAuth));
-                }
                 return;
             }
             // OAuth authorize endpoint - Start OAuth flow
@@ -918,9 +1330,17 @@ class FigmaSmartImageServer {
                     res.end("<html><body><h1>OAuth Not Configured</h1><p>FIGMA_CLIENT_ID environment variable is not set.</p></body></html>");
                     return;
                 }
-                const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-                    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-                    : `http://localhost:${HTTP_PORT}`;
+                let baseUrl;
+                if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+                    baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+                }
+                else if (req.headers.host) {
+                    const protocol = req.headers['x-forwarded-proto'] || (req.connection.encrypted ? 'https' : 'http');
+                    baseUrl = `${protocol}://${req.headers.host}`;
+                }
+                else {
+                    baseUrl = `http://localhost:${HTTP_PORT}`;
+                }
                 const redirectUri = `${baseUrl}/oauth/callback`;
                 const codeVerifier = this.generateCodeVerifier();
                 const state = this.generateState();
@@ -936,7 +1356,7 @@ class FigmaSmartImageServer {
                     const figmaAuthUrl = new URL("https://www.figma.com/oauth");
                     figmaAuthUrl.searchParams.set("client_id", clientId);
                     figmaAuthUrl.searchParams.set("redirect_uri", redirectUri);
-                    figmaAuthUrl.searchParams.set("scope", "file_content:read");
+                    figmaAuthUrl.searchParams.set("scope", "file_content:read file_metadata:read file_variables:read");
                     figmaAuthUrl.searchParams.set("state", state);
                     figmaAuthUrl.searchParams.set("response_type", "code");
                     figmaAuthUrl.searchParams.set("code_challenge", codeChallenge);
@@ -952,7 +1372,7 @@ class FigmaSmartImageServer {
                 const state = url.searchParams.get("state");
                 const error = url.searchParams.get("error");
                 if (error) {
-                    res.writeHead(302, { Location: `/auth?error=${encodeURIComponent(error)}` });
+                    res.writeHead(302, { Location: `/?error=${encodeURIComponent(error)}` });
                     res.end();
                     return;
                 }
@@ -971,16 +1391,8 @@ class FigmaSmartImageServer {
                 // Clean up state
                 this.oauthStates.delete(state);
                 try {
-                    console.log("[OAuth Callback] Exchanging code for token, state:", state);
                     // Exchange code for access token
                     const tokenResponse = await this.exchangeCodeForToken(code, oauthState.codeVerifier, oauthState.redirectUri);
-                    console.log("[OAuth Callback] Token received:", {
-                        hasAccessToken: !!tokenResponse.access_token,
-                        accessTokenLength: tokenResponse.access_token?.length,
-                        accessTokenPrefix: tokenResponse.access_token?.substring(0, 10),
-                        hasRefreshToken: !!tokenResponse.refresh_token,
-                        expiresIn: tokenResponse.expires_in,
-                    });
                     // Store token in Redis with refresh capability
                     const sessionData = {
                         token: tokenResponse.access_token,
@@ -989,15 +1401,14 @@ class FigmaSmartImageServer {
                         createdAt: Date.now(),
                     };
                     await sessionTokensStorage.set(state, sessionData);
-                    console.log("[OAuth Callback] Token stored successfully for session:", state);
                     // Redirect back to auth page with success
-                    res.writeHead(302, { Location: `/auth?oauth=success&session=${state}` });
+                    res.writeHead(302, { Location: `/?oauth=success&session=${state}` });
                     res.end();
                 }
                 catch (error) {
                     console.error("[OAuth Callback] Error:", error);
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    res.writeHead(302, { Location: `/auth?error=${encodeURIComponent(errorMessage)}` });
+                    res.writeHead(302, { Location: `/?error=${encodeURIComponent(errorMessage)}` });
                     res.end();
                 }
                 return;
@@ -1103,10 +1514,17 @@ class FigmaSmartImageServer {
                     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
                     // Create SSE transport and connect to server
                     const transport = new SSEServerTransport("/message", res);
-                    await this.server.connect(transport);
-                    // Store transport by session ID for multi-tenant support
+                    // Store transport before connect to avoid race with initial endpoint event
                     transports.set(transport.sessionId, transport);
                     this.sessionTransports.set(transport.sessionId, transport);
+                    try {
+                        await this.server.connect(transport);
+                    }
+                    catch (error) {
+                        transports.delete(transport.sessionId);
+                        this.sessionTransports.delete(transport.sessionId);
+                        throw error;
+                    }
                     // Clean up when connection closes
                     res.on("close", async () => {
                         transports.delete(transport.sessionId);
@@ -1129,6 +1547,10 @@ class FigmaSmartImageServer {
             }
             // Message endpoint for POST requests from SSE client
             if (url.pathname === "/message" && req.method === "POST") {
+                // Ensure CORS headers for browser/desktop clients
+                res.setHeader("Access-Control-Allow-Origin", "*");
+                res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+                res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
                 // Extract session ID from query string
                 const sessionId = url.searchParams.get("sessionId");
                 if (!sessionId) {
@@ -1218,6 +1640,7 @@ class FigmaSmartImageServer {
         if (!clientId || !clientSecret) {
             throw new Error('FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET must be configured');
         }
+        // Figma expects form-encoded data for token exchange
         const params = new URLSearchParams();
         params.append('client_id', clientId);
         params.append('client_secret', clientSecret);
@@ -1233,14 +1656,8 @@ class FigmaSmartImageServer {
             body: params.toString(),
         });
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Token exchange failed:', {
-                status: response.status,
-                statusText: response.statusText,
-                body: errorText,
-                url: 'https://api.figma.com/v1/oauth/token',
-            });
-            throw new Error(`Token exchange failed (${response.status}): ${errorText}`);
+            const error = await response.text();
+            throw new Error(`Token exchange failed: ${error}`);
         }
         const tokenData = await response.json();
         return tokenData;
@@ -1251,6 +1668,7 @@ class FigmaSmartImageServer {
         if (!clientId || !clientSecret) {
             throw new Error('FIGMA_CLIENT_ID and FIGMA_CLIENT_SECRET must be configured');
         }
+        // Figma expects form-encoded data for token refresh
         const params = new URLSearchParams();
         params.append('client_id', clientId);
         params.append('client_secret', clientSecret);
