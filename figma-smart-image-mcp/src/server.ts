@@ -1770,10 +1770,36 @@ You can manually extract design tokens by:
 
       // MCP endpoint - supports Streamable HTTP and legacy SSE
       if (url.pathname === "/mcp") {
+        const authHeader = req.headers.authorization;
+        const oauthEnabled = !!process.env.FIGMA_CLIENT_ID;
+        if (oauthEnabled && (!authHeader || !authHeader.startsWith('Bearer '))) {
+          let baseUrl: string;
+          if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+            baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+          } else if (process.env.RAILWAY_STATIC_URL) {
+            baseUrl = process.env.RAILWAY_STATIC_URL;
+          } else if (req.headers.host) {
+            const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+            baseUrl = `${protocol}://${req.headers.host}`;
+          } else {
+            baseUrl = `http://localhost:${port}`;
+          }
+
+          res.writeHead(401, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version",
+            "WWW-Authenticate": `Bearer realm=\"mcp\", resource_metadata=\"${baseUrl}/.well-known/oauth-protected-resource\"`,
+          });
+          res.end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+
         const mcpSessionIdHeader = typeof req.headers['mcp-session-id'] === 'string'
           ? req.headers['mcp-session-id']
           : undefined;
-        const hasStreamableHeaders = typeof req.headers['mcp-protocol-version'] === 'string' || !!mcpSessionIdHeader;
+        const hasStreamableHeaders = typeof req.headers['mcp-protocol-version'] === 'string' || !!mcpSessionIdHeader || !!authHeader;
         const useStreamableTransport = req.method !== "GET" || hasStreamableHeaders;
 
         if (useStreamableTransport) {
@@ -1781,32 +1807,6 @@ You can manually extract design tokens by:
           res.setHeader("Access-Control-Allow-Origin", "*");
           res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
           res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version");
-
-          const oauthEnabled = !!process.env.FIGMA_CLIENT_ID;
-          const authHeader = req.headers.authorization;
-          if (oauthEnabled && (!authHeader || !authHeader.startsWith('Bearer '))) {
-            let baseUrl: string;
-            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-              baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-            } else if (process.env.RAILWAY_STATIC_URL) {
-              baseUrl = process.env.RAILWAY_STATIC_URL;
-            } else if (req.headers.host) {
-              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-              baseUrl = `${protocol}://${req.headers.host}`;
-            } else {
-              baseUrl = `http://localhost:${port}`;
-            }
-
-            res.writeHead(401, {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version",
-              "WWW-Authenticate": `Bearer realm=\"mcp\", resource_metadata=\"${baseUrl}/.well-known/oauth-protected-resource\"`,
-            });
-            res.end(JSON.stringify({ error: "unauthorized" }));
-            return;
-          }
 
           let parsedBody: any = undefined;
           if (req.method === "POST") {
