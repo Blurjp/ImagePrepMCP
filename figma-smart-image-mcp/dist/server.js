@@ -10,6 +10,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { createServer as createHttpServer } from "http";
@@ -866,10 +867,22 @@ You can manually extract design tokens by:
         const transport = new StdioServerTransport();
         await this.server.connect(transport);
     }
-    runHttp(port) {
+    async runHttp(port) {
         // Store the transport instance to handle POST messages
         // Using a Map to support multiple concurrent connections
         const transports = new Map();
+        // Streamable HTTP transport for Claude Desktop's built-in HTTP client
+        const streamableTransport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => crypto.randomUUID(),
+            onsessioninitialized: (sessionId) => {
+                this.sessionTransports.set(sessionId, { lastActivity: Date.now() });
+            },
+            onsessionclosed: async (sessionId) => {
+                this.sessionTransports.delete(sessionId);
+                await sessionTokensStorage.delete(sessionId);
+            },
+        });
+        await this.server.connect(streamableTransport);
         const httpServer = createHttpServer(async (req, res) => {
             const url = new URL(req.url || "", `http://${req.headers.host}`);
             // Rate limiting: use IP address as identifier (skip for health check)
@@ -1545,8 +1558,80 @@ You can manually extract design tokens by:
                     return;
                 }
             }
-            // MCP endpoint - handles both GET (SSE) and POST (direct) requests
+            // MCP endpoint - supports Streamable HTTP and legacy SSE
             if (url.pathname === "/mcp") {
+                const mcpSessionIdHeader = typeof req.headers['mcp-session-id'] === 'string'
+                    ? req.headers['mcp-session-id']
+                    : undefined;
+                const hasStreamableHeaders = typeof req.headers['mcp-protocol-version'] === 'string' || !!mcpSessionIdHeader;
+                const useStreamableTransport = req.method !== "GET" || hasStreamableHeaders;
+                if (useStreamableTransport) {
+                    // CORS headers for Streamable HTTP
+                    res.setHeader("Access-Control-Allow-Origin", "*");
+                    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+                    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version");
+                    let parsedBody = undefined;
+                    if (req.method === "POST") {
+                        let body = "";
+                        req.on("data", (chunk) => {
+                            body += chunk.toString();
+                        });
+                        req.on("end", async () => {
+                            if (body.length > 0) {
+                                try {
+                                    parsedBody = JSON.parse(body);
+                                }
+                                catch (error) {
+                                    res.writeHead(400, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({
+                                        jsonrpc: "2.0",
+                                        error: { code: -32700, message: "Parse error: Invalid JSON" },
+                                        id: null,
+                                    }));
+                                    return;
+                                }
+                            }
+                            // Use device code (Bearer) as session ID for auth if present
+                            const authHeader = req.headers.authorization;
+                            let authSessionId = mcpSessionIdHeader;
+                            if (authHeader && authHeader.startsWith('Bearer ')) {
+                                authSessionId = authHeader.substring(7);
+                            }
+                            if (authSessionId && parsedBody) {
+                                const injectSession = (message) => {
+                                    if (message?.params && typeof message.params === 'object') {
+                                        message.params._meta = {
+                                            ...message.params._meta,
+                                            sessionId: authSessionId,
+                                        };
+                                    }
+                                };
+                                if (Array.isArray(parsedBody)) {
+                                    parsedBody.forEach(injectSession);
+                                }
+                                else {
+                                    injectSession(parsedBody);
+                                }
+                            }
+                            if (mcpSessionIdHeader) {
+                                const existing = this.sessionTransports.get(mcpSessionIdHeader);
+                                if (existing) {
+                                    existing.lastActivity = Date.now();
+                                }
+                            }
+                            await streamableTransport.handleRequest(req, res, parsedBody);
+                        });
+                        return;
+                    }
+                    if (mcpSessionIdHeader) {
+                        const existing = this.sessionTransports.get(mcpSessionIdHeader);
+                        if (existing) {
+                            existing.lastActivity = Date.now();
+                        }
+                    }
+                    await streamableTransport.handleRequest(req, res);
+                    return;
+                }
                 if (req.method === "GET") {
                     // Set CORS headers before transport takes over
                     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -2225,7 +2310,7 @@ https://www.figma.com/design/abc123/..."</div>
     }
     async run() {
         if (this.transportMode === "http") {
-            this.runHttp(HTTP_PORT);
+            await this.runHttp(HTTP_PORT);
         }
         else {
             await this.runStdio();

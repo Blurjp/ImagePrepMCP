@@ -32,7 +32,7 @@ declare class FigmaSmartImageServer {
     private handleGetFigmaNodeDetails;
     private handleGetFigmaVariables;
     runStdio(): Promise<void>;
-    runHttp(port: number): void;
+    runHttp(port: number): Promise<void>;
     private generateCodeVerifier;
     private base64URLEncode;
     private generateCodeChallenge;
