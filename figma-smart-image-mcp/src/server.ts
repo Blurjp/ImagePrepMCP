@@ -1747,17 +1747,27 @@ You can manually extract design tokens by:
 
       // Message endpoint for POST requests from SSE client
       if (url.pathname === "/message" && req.method === "POST") {
+        // Set CORS headers
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
         // Extract session ID from query string
         const sessionId = url.searchParams.get("sessionId");
         if (!sessionId) {
-          res.writeHead(400, { "Content-Type": "application/json" });
+          res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
           res.end(JSON.stringify({ error: "Missing sessionId" }));
           return;
         }
 
         const transport = transports.get(sessionId);
         if (!transport) {
-          res.writeHead(404, { "Content-Type": "application/json" });
+          res.writeHead(404, {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          });
           res.end(JSON.stringify({ error: "Session not found" }));
           return;
         }
