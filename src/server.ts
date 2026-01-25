@@ -1063,10 +1063,10 @@ You can manually extract design tokens by:
         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({
           issuer: baseUrl,
-          authorization_endpoint: `${baseUrl}/`,
+          authorization_endpoint: `${baseUrl}/oauth/authorize`,
           token_endpoint: `${baseUrl}/oauth/token`,
           registration_endpoint: `${baseUrl}/register`,
-          device_authorization_endpoint: `${baseUrl}/device/authorize`,
+          device_authorization_endpoint: `${baseUrl}/oauth/device_authorization`,
           response_types_supported: ["code"],
           grant_types_supported: ["authorization_code", "urn:ietf:params:oauth:grant-type:device_code"],
           code_challenge_methods_supported: ["S256"],
@@ -1077,25 +1077,57 @@ You can manually extract design tokens by:
 
       // OAuth device authorization endpoint - returns info about web auth
       if (url.pathname === "/oauth/device_authorization" && req.method === "POST") {
-        let baseUrl: string;
-        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-        } else if (req.headers.host) {
-          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-          baseUrl = `${protocol}://${req.headers.host}`;
-        } else {
-          baseUrl = `http://localhost:${port}`;
-        }
+        let body = "";
+        req.on("data", (chunk) => { body += chunk.toString(); });
+        req.on("end", async () => {
+          try {
+            const params = new URLSearchParams(body);
+            const clientId = params.get("client_id");
 
-        res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
-        res.end(JSON.stringify({
-          device_code: "web_auth",
-          user_code: "WEB",
-          verification_uri: `${baseUrl}/`,
-          verification_uri_complete: `${baseUrl}/`,
-          expires_in: 300,
-          interval: 5,
-        }));
+            // Generate a device code for this authorization request
+            const deviceCode = "device_" + Math.random().toString(36).substring(2, 15);
+            const userCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+            // Check if we have any OAuth tokens in Redis for auto-verification
+            console.error("[OAuth Device] Checking for existing OAuth tokens...");
+            const mostRecent = await sessionTokensStorage.getMostRecent();
+            const hasOAuthToken = !!mostRecent?.value?.token;
+            console.error(`[OAuth Device] hasOAuthToken: ${hasOAuthToken}`);
+
+            // Store device code in Redis for later verification
+            // Auto-verify if we have a global token OR OAuth tokens exist
+            await deviceCodesStorage.set(deviceCode, {
+              userCode,
+              clientId: clientId || "unknown",
+              createdAt: Date.now(),
+              verified: !!this.figmaToken || hasOAuthToken,
+              figmaToken: hasOAuthToken ? mostRecent.value.token : this.figmaToken,
+            });
+
+            let baseUrl: string;
+            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+              baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+            } else if (req.headers.host) {
+              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+              baseUrl = `${protocol}://${req.headers.host}`;
+            } else {
+              baseUrl = `http://localhost:${port}`;
+            }
+
+            res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+            res.end(JSON.stringify({
+              device_code: deviceCode,
+              user_code: userCode,
+              verification_uri: `${baseUrl}/`,
+              verification_uri_complete: `${baseUrl}/`,
+              expires_in: 600,
+              interval: 2,
+            }));
+          } catch (error) {
+            res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+            res.end(JSON.stringify({ error: "invalid_request" }));
+          }
+        });
         return;
       }
 
