@@ -1083,6 +1083,29 @@ You can manually extract design tokens by:
         return;
       }
 
+      // OAuth protected resource metadata (RFC 9728)
+      if (url.pathname === "/.well-known/oauth-protected-resource") {
+        let baseUrl: string;
+        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+        } else if (process.env.RAILWAY_STATIC_URL) {
+          baseUrl = process.env.RAILWAY_STATIC_URL;
+        } else if (req.headers.host) {
+          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+          baseUrl = `${protocol}://${req.headers.host}`;
+        } else {
+          baseUrl = `http://localhost:${port}`;
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+        res.end(JSON.stringify({
+          resource: `${baseUrl}/mcp`,
+          authorization_servers: [baseUrl],
+          resource_name: "figma-smart-image-mcp",
+        }));
+        return;
+      }
+
       // OAuth device authorization endpoint - returns info about web auth
       if (url.pathname === "/oauth/device_authorization" && req.method === "POST") {
         let body = "";
@@ -1759,6 +1782,32 @@ You can manually extract design tokens by:
           res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
           res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version");
 
+          const oauthEnabled = !!process.env.FIGMA_CLIENT_ID;
+          const authHeader = req.headers.authorization;
+          if (oauthEnabled && (!authHeader || !authHeader.startsWith('Bearer '))) {
+            let baseUrl: string;
+            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+              baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+            } else if (process.env.RAILWAY_STATIC_URL) {
+              baseUrl = process.env.RAILWAY_STATIC_URL;
+            } else if (req.headers.host) {
+              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+              baseUrl = `${protocol}://${req.headers.host}`;
+            } else {
+              baseUrl = `http://localhost:${port}`;
+            }
+
+            res.writeHead(401, {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version",
+              "WWW-Authenticate": `Bearer realm=\"mcp\", resource_metadata=\"${baseUrl}/.well-known/oauth-protected-resource\"`,
+            });
+            res.end(JSON.stringify({ error: "unauthorized" }));
+            return;
+          }
+
           let parsedBody: any = undefined;
           if (req.method === "POST") {
             let body = "";
@@ -1781,7 +1830,6 @@ You can manually extract design tokens by:
               }
 
               // Use device code (Bearer) as session ID for auth if present
-              const authHeader = req.headers.authorization;
               let authSessionId = mcpSessionIdHeader;
               if (authHeader && authHeader.startsWith('Bearer ')) {
                 authSessionId = authHeader.substring(7);
@@ -1818,7 +1866,6 @@ You can manually extract design tokens by:
             return;
           }
 
-          const authHeader = req.headers.authorization;
           let authSessionId = mcpSessionIdHeader;
           if (authHeader && authHeader.startsWith('Bearer ')) {
             authSessionId = authHeader.substring(7);
