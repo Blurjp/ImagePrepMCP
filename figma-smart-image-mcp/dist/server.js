@@ -1525,10 +1525,11 @@ You can manually extract design tokens by:
                     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
                     // Create SSE transport and connect to server
                     const transport = new SSEServerTransport("/message", res);
-                    await this.server.connect(transport);
-                    // Store transport by session ID for multi-tenant support
+                    // Store transport by session ID BEFORE connecting to avoid race condition
+                    // The client receives the endpoint event immediately and may send POST before connect() completes
                     transports.set(transport.sessionId, transport);
                     this.sessionTransports.set(transport.sessionId, transport);
+                    await this.server.connect(transport);
                     // Clean up when connection closes
                     res.on("close", async () => {
                         transports.delete(transport.sessionId);
