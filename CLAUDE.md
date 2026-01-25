@@ -37,18 +37,15 @@ COPY figma-smart-image-mcp/src ./src
 RUN npm run build                   # ← Now build explicitly after sources are copied
 ```
 
-### 2. Project Structure Confusion
+### 2. Project Structure (Canonical Source)
 
-**Problem**: The project has TWO `src/` directories:
-- `/Users/jianping/projects/ImagePrepMCP/src/` (root level)
-- `/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/src/` (subdirectory)
+**Current State (authoritative)**: The **only** project that is used/deployed is the nested one:
+- `/Users/jianping/projects/ImagePrepMCP/figma-smart-image-mcp/`
 
-**Impact**:
-- I was editing `figma-smart-image-mcp/src/` but the Dockerfile copies from `figma-smart-image-mcp/src/`
-- The root `src/` is a symlink/copy that should be kept in sync
-- Always verify which directory the build system is actually using
+**Not used**:
+- `/Users/jianping/projects/ImagePrepMCP/` (root-level project) is legacy and should be ignored for edits/deploys.
 
-**Best Practice**: Keep a single source of truth. If the root `src/` is a copy, always update both or use a symlink.
+**Guideline**: Edit/build/commit only inside `figma-smart-image-mcp/` and its `src/` + `dist/`.
 
 ### 3. Railway Deployment Configuration
 

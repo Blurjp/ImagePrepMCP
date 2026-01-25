@@ -2,6 +2,8 @@
 
 A Model Context Protocol (MCP) server that processes Figma designs into Claude-readable images with automatic tiling, compression, and smart cropping.
 
+Note: The canonical source for the server lives in `figma-smart-image-mcp/`. The root directory only contains docs and deployment helpers.
+
 ## Live Deployment
 
 **Public URL:** https://figma-smart-image-mcp-production.up.railway.app/
