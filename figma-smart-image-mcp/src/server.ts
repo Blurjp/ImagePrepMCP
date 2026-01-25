@@ -1013,14 +1013,8 @@ You can manually extract design tokens by:
 
     // Streamable HTTP transport for Claude Desktop's built-in HTTP client
     const streamableTransport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => crypto.randomUUID(),
-      onsessioninitialized: (sessionId) => {
-        this.sessionTransports.set(sessionId, { lastActivity: Date.now() });
-      },
-      onsessionclosed: async (sessionId) => {
-        this.sessionTransports.delete(sessionId);
-        await sessionTokensStorage.delete(sessionId);
-      },
+      // Stateless mode to allow multiple concurrent initializations
+      sessionIdGenerator: undefined,
     });
     await this.server.connect(streamableTransport);
 
@@ -1810,10 +1804,12 @@ You can manually extract design tokens by:
                 }
               }
 
-              if (mcpSessionIdHeader) {
-                const existing = this.sessionTransports.get(mcpSessionIdHeader) as any;
+              if (authSessionId) {
+                const existing = this.sessionTransports.get(authSessionId) as any;
                 if (existing) {
                   existing.lastActivity = Date.now();
+                } else {
+                  this.sessionTransports.set(authSessionId, { lastActivity: Date.now() });
                 }
               }
 
@@ -1822,10 +1818,18 @@ You can manually extract design tokens by:
             return;
           }
 
-          if (mcpSessionIdHeader) {
-            const existing = this.sessionTransports.get(mcpSessionIdHeader) as any;
+          const authHeader = req.headers.authorization;
+          let authSessionId = mcpSessionIdHeader;
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+            authSessionId = authHeader.substring(7);
+          }
+
+          if (authSessionId) {
+            const existing = this.sessionTransports.get(authSessionId) as any;
             if (existing) {
               existing.lastActivity = Date.now();
+            } else {
+              this.sessionTransports.set(authSessionId, { lastActivity: Date.now() });
             }
           }
 
