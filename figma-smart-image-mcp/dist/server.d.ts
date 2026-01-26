@@ -15,6 +15,7 @@ declare class FigmaSmartImageServer {
     private sessionTransports;
     private rateLimiter;
     private oauthStates;
+    private oauthAuthCodes;
     constructor(transportMode?: TransportMode);
     /**
      * Get token for a specific session

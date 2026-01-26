@@ -205,6 +205,7 @@ class FigmaSmartImageServer {
   private sessionTransports: Map<string, any>;  // Track transports per session (in-memory, per-instance)
   private rateLimiter: RateLimiter;
   private oauthStates: Map<string, { codeVerifier: string; redirectUri: string; createdAt: number }>;  // OAuth state management
+  private oauthAuthCodes: Map<string, { codeChallenge: string; codeChallengeMethod: string; redirectUri: string; clientId: string; figmaToken: string; createdAt: number }>;
 
   constructor(transportMode: TransportMode = "stdio") {
     this.transportMode = transportMode;
@@ -212,6 +213,7 @@ class FigmaSmartImageServer {
     this.figmaToken = process.env.FIGMA_TOKEN || loadTokenFromFile() || "";
     this.sessionTransports = new Map();
     this.oauthStates = new Map();
+    this.oauthAuthCodes = new Map();
     // Rate limiting: 100 requests per minute per IP
     this.rateLimiter = new RateLimiter(100, 60000);
 
@@ -282,6 +284,13 @@ class FigmaSmartImageServer {
       // Note: sessionTransports is per-instance and doesn't need Redis
       if (transport && (now - (transport as any).lastActivity > 60 * 60 * 1000)) {
         this.sessionTransports.delete(sessionId);
+      }
+    }
+
+    // Clean up expired OAuth auth codes (10 minutes)
+    for (const [code, entry] of this.oauthAuthCodes.entries()) {
+      if (now - entry.createdAt > 10 * 60 * 1000) {
+        this.oauthAuthCodes.delete(code);
       }
     }
   }
@@ -1170,6 +1179,64 @@ You can manually extract design tokens by:
           const params = new URLSearchParams(body);
           const grantType = params.get("grant_type");
           const deviceCode = params.get("device_code");
+          const authCode = params.get("code");
+          const codeVerifier = params.get("code_verifier");
+          const redirectUri = params.get("redirect_uri");
+
+          if (grantType === "authorization_code") {
+            if (!authCode || !codeVerifier || !redirectUri) {
+              res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+              res.end(JSON.stringify({
+                error: "invalid_grant",
+                error_description: "Missing authorization code or code verifier",
+              }));
+              return;
+            }
+
+            const entry = this.oauthAuthCodes.get(authCode);
+            if (!entry || entry.redirectUri !== redirectUri) {
+              res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+              res.end(JSON.stringify({
+                error: "invalid_grant",
+                error_description: "Invalid or expired authorization code",
+              }));
+              return;
+            }
+
+            try {
+              const expectedChallenge = await this.generateCodeChallenge(codeVerifier);
+              if (entry.codeChallengeMethod !== "S256" || expectedChallenge !== entry.codeChallenge) {
+                res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+                res.end(JSON.stringify({
+                  error: "invalid_grant",
+                  error_description: "PKCE verification failed",
+                }));
+                return;
+              }
+            } catch (error) {
+              res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders });
+              res.end(JSON.stringify({
+                error: "invalid_grant",
+                error_description: "PKCE verification failed",
+              }));
+              return;
+            }
+
+            this.oauthAuthCodes.delete(authCode);
+            const accessToken = "mcp_" + this.generateState();
+            await sessionTokensStorage.set(accessToken, {
+              token: entry.figmaToken,
+              createdAt: Date.now(),
+            });
+
+            res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
+            res.end(JSON.stringify({
+              access_token: accessToken,
+              token_type: "Bearer",
+              expires_in: 3600,
+            }));
+            return;
+          }
 
           // Device code flow polling
           if (grantType === "urn:ietf:params:oauth:grant-type:device_code") {
@@ -1571,6 +1638,55 @@ You can manually extract design tokens by:
 
       // OAuth authorize endpoint - Start OAuth flow
       if (url.pathname === "/oauth/authorize" && req.method === "GET") {
+        // MCP OAuth (authorization code + PKCE)
+        const mcpClientId = url.searchParams.get("client_id");
+        const mcpRedirectUri = url.searchParams.get("redirect_uri");
+        if (mcpClientId && mcpRedirectUri) {
+          const responseType = url.searchParams.get("response_type");
+          const codeChallenge = url.searchParams.get("code_challenge");
+          const codeChallengeMethod = url.searchParams.get("code_challenge_method");
+          const state = url.searchParams.get("state");
+
+          if (responseType !== "code" || !codeChallenge || !codeChallengeMethod) {
+            res.writeHead(400, { "Content-Type": "text/html" });
+            res.end("<html><body><h1>Invalid request</h1><p>Missing or invalid OAuth parameters.</p></body></html>");
+            return;
+          }
+
+          if (codeChallengeMethod !== "S256") {
+            res.writeHead(400, { "Content-Type": "text/html" });
+            res.end("<html><body><h1>Unsupported PKCE method</h1><p>Only S256 is supported.</p></body></html>");
+            return;
+          }
+
+          const mostRecent = await sessionTokensStorage.getMostRecent();
+          const token = mostRecent?.value?.token || this.figmaToken;
+          if (!token) {
+            res.writeHead(403, { "Content-Type": "text/html" });
+            res.end("<html><body><h1>Not authenticated</h1><p>Please authenticate with Figma at the home page, then retry.</p></body></html>");
+            return;
+          }
+
+          const code = "auth_" + this.generateState();
+          this.oauthAuthCodes.set(code, {
+            codeChallenge,
+            codeChallengeMethod,
+            redirectUri: mcpRedirectUri,
+            clientId: mcpClientId,
+            figmaToken: token,
+            createdAt: Date.now(),
+          });
+
+          const redirectUrl = new URL(mcpRedirectUri);
+          redirectUrl.searchParams.set("code", code);
+          if (state) {
+            redirectUrl.searchParams.set("state", state);
+          }
+          res.writeHead(302, { Location: redirectUrl.toString() });
+          res.end();
+          return;
+        }
+
         const clientId = process.env.FIGMA_CLIENT_ID;
         if (!clientId) {
           res.writeHead(500, { "Content-Type": "text/html" });
