@@ -48,7 +48,21 @@ export class FigmaLinkParser {
 
     // Extract nodeId from query parameter
     const nodeIdMatch = trimmedUrl.match(this.NODE_ID_PATTERN);
-    const nodeId = nodeIdMatch ? nodeIdMatch[1] : undefined;
+    let nodeId = nodeIdMatch ? nodeIdMatch[1] : undefined;
+    if (nodeId) {
+      try {
+        nodeId = decodeURIComponent(nodeId);
+      } catch {
+        // keep original if decoding fails
+      }
+
+      // Normalize Figma node-id formats
+      // Figma URLs often use 1-1234 while API expects 1:1234
+      if (!nodeId.includes(":") && /^[0-9]+-[0-9]+$/.test(nodeId)) {
+        const [left, right] = nodeId.split("-");
+        nodeId = `${left}:${right}`;
+      }
+    }
 
     return {
       fileKey,
