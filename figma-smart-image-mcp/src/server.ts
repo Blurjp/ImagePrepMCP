@@ -2622,7 +2622,7 @@ You can manually extract design tokens by:
 
     <div class="status">
       <div class="status-dot"></div>
-      <span>${hasToken ? 'Connected to Figma' : 'Not connected - Enter your Figma token'}</span>
+      <span>${hasToken ? 'Connected to Figma' : 'Checking authentication status...'}</span>
     </div>
 
     ${!hasToken ? `
@@ -2784,6 +2784,25 @@ https://www.figma.com/design/abc123/..."</div>
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
     }
+
+    // Sync status with server-side auth state
+    fetch('/health')
+      .then((res) => res.json())
+      .then((data) => {
+        const statusDiv = document.querySelector('.status');
+        if (!statusDiv) return;
+
+        if (data?.hasOAuthToken || data?.hasToken || data?.hasDefaultToken) {
+          statusDiv.innerHTML = '<div class="status-dot" style="background: #4ade80"></div><span>Connected to Figma</span>';
+          statusDiv.style.background = '#2d6a4f';
+        } else {
+          statusDiv.innerHTML = '<div class="status-dot"></div><span>Not connected - Enter your Figma token</span>';
+          statusDiv.style.background = '#3a3a5c';
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
 
     ${!hasToken ? `
     document.getElementById('authForm').addEventListener('submit', async (e) => {
