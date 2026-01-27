@@ -233,10 +233,15 @@ This allows MCP clients to auto-connect without manual authentication when OAuth
 - Use this when the user says “the file is mine but I still get 403”.
 - If `access.statusCode` is 403, the OAuth token is for a different Figma account or lacks file sharing access.
 
-### 10. Server Timeouts (Env)
+### 10. Clearing Invalid OAuth Tokens
+- If `debug_figma_access` returns `Invalid token`, clear Redis auth state via:
+  - `GET /health?debug=clear_oauth` (clears session tokens + device codes)
+- Then re-authenticate and re-run `debug_figma_access`.
+
+### 11. Server Timeouts (Env)
 - `MCP_TOOL_TIMEOUT_MS` / `FIGMA_TOOL_TIMEOUT_MS` (default 60000) controls tool execution.
 - `FIGMA_REQUEST_TIMEOUT_MS` controls Figma API + image download timeout.
 
-### 11. Build Artifacts + Git Hygiene
+### 12. Build Artifacts + Git Hygiene
 - Root `.gitignore` ignores root `/dist`, `/out`, and `node_modules/`.
 - Keep `figma-smart-image-mcp/dist` tracked.

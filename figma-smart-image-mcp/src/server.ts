@@ -1705,6 +1705,17 @@ You can manually extract design tokens by:
           }));
           return;
         }
+        if (debugAction === "clear_oauth") {
+          const clearedSessions = await sessionTokensStorage.clearAll();
+          const clearedDevices = await deviceCodesStorage.clearAll();
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            status: "ok",
+            clearedSessions,
+            clearedDevices
+          }));
+          return;
+        }
 
         const figmaUrl = url.searchParams.get("figma");
 

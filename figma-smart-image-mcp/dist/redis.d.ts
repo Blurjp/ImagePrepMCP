@@ -12,6 +12,7 @@ export declare const deviceCodesStorage: {
     delete(key: string): Promise<void>;
     entries(): Promise<Array<[string, any]>>;
     keys(): Promise<string[]>;
+    clearAll(): Promise<number>;
 };
 /**
  * Session token storage operations
@@ -23,6 +24,7 @@ export declare const sessionTokensStorage: {
     has(key: string): Promise<boolean>;
     size(): Promise<number>;
     entries(): Promise<Array<[string, any]>>;
+    clearAll(): Promise<number>;
     getMostRecent(): Promise<{
         key: string;
         value: any;

@@ -100,6 +100,18 @@ export const deviceCodesStorage = {
             return keys.map((k) => k.substring(7));
         }
         return Array.from(inMemoryDeviceCodes.keys());
+    },
+    async clearAll() {
+        const redis = getRedisClient();
+        if (redis) {
+            const keys = await redis.keys("device:*");
+            if (keys.length === 0)
+                return 0;
+            return await redis.del(keys);
+        }
+        const count = inMemoryDeviceCodes.size;
+        inMemoryDeviceCodes.clear();
+        return count;
     }
 };
 /**
@@ -163,6 +175,18 @@ export const sessionTokensStorage = {
             return entries;
         }
         return Array.from(inMemorySessionTokens.entries());
+    },
+    async clearAll() {
+        const redis = getRedisClient();
+        if (redis) {
+            const keys = await redis.keys("session:*");
+            if (keys.length === 0)
+                return 0;
+            return await redis.del(keys);
+        }
+        const count = inMemorySessionTokens.size;
+        inMemorySessionTokens.clear();
+        return count;
     },
     async getMostRecent() {
         console.log("[Redis] getMostRecent called");
