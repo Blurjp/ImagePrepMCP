@@ -68,12 +68,17 @@ const ListFigmaFramesInputSchema = z.object({
   max_frames: z.number().int().positive().optional(),
 });
 
+const DebugFigmaAccessInputSchema = z.object({
+  url: z.string().url("Must be a valid Figma URL"),
+});
+
 // Type for tool arguments
 type ProcessFigmaLinkArgs = z.infer<typeof ProcessFigmaLinkInputSchema>;
 type GetFigmaComponentsArgs = z.infer<typeof GetFigmaComponentsInputSchema>;
 type GetFigmaNodeDetailsArgs = z.infer<typeof GetFigmaNodeDetailsInputSchema>;
 type GetFigmaVariablesArgs = z.infer<typeof GetFigmaVariablesInputSchema>;
 type ListFigmaFramesArgs = z.infer<typeof ListFigmaFramesInputSchema>;
+type DebugFigmaAccessArgs = z.infer<typeof DebugFigmaAccessInputSchema>;
 
 // Default constants
 const DEFAULT_MAX_BYTES = 4_000_000; // 4MB
@@ -408,6 +413,19 @@ class FigmaSmartImageServer {
               required: ["url"],
             } as any,
           },
+          {
+            name: "debug_figma_access",
+            description:
+              "Check which Figma user/token is active and whether the file is accessible. " +
+              "Returns /v1/me info and a shallow access check without loading the full file.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                url: { type: "string", description: "The Figma file URL" },
+              },
+              required: ["url"],
+            } as any,
+          },
         ] satisfies Tool[],
       };
     });
@@ -433,6 +451,10 @@ class FigmaSmartImageServer {
 
         if (toolName === "list_figma_frames") {
           return await this.handleListFigmaFrames(request.params.arguments as any);
+        }
+
+        if (toolName === "debug_figma_access") {
+          return await this.handleDebugFigmaAccess(request.params.arguments as any);
         }
 
         throw new Error(`Unknown tool: ${toolName}`);
@@ -1090,6 +1112,59 @@ You can manually extract design tokens by:
         returned: limited.length,
         frames: limited,
         note: "Use the node id in a URL like: https://www.figma.com/design/<fileKey>?node-id=<id>",
+      };
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(output, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error: ${errorMessage}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  private async handleDebugFigmaAccess(args: DebugFigmaAccessArgs) {
+    try {
+      const sessionId = (args as any)._meta?.sessionId;
+      const token = await this.getTokenForSession(sessionId || "");
+
+      if (!token) {
+        throw new Error("No Figma token available. Please authenticate first.");
+      }
+
+      const validated = DebugFigmaAccessInputSchema.parse(args);
+      const parsed = FigmaLinkParser.parse(validated.url);
+      const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
+
+      let me: any = null;
+      let meError: string | undefined;
+      try {
+        me = await api.getMe();
+      } catch (error) {
+        meError = error instanceof Error ? error.message : String(error);
+      }
+
+      const access = await api.checkFileAccess(parsed.fileKey);
+
+      const output = {
+        fileKey: parsed.fileKey,
+        user: me,
+        userError: meError,
+        access,
+        note: "If access.statusCode is 403, the token user does not have access to this file.",
       };
 
       return {

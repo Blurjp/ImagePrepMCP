@@ -39,6 +39,21 @@ export class FigmaApiClient {
             }
         }
     }
+    parseErrorBody(bodyText) {
+        try {
+            const parsed = JSON.parse(bodyText);
+            if (parsed && typeof parsed === "object") {
+                return {
+                    err: typeof parsed.err === "string" ? parsed.err : undefined,
+                    code: typeof parsed.code === "string" ? parsed.code : undefined,
+                };
+            }
+        }
+        catch {
+            // ignore
+        }
+        return {};
+    }
     /**
      * Get file information from Figma.
      */
@@ -62,6 +77,61 @@ export class FigmaApiClient {
                 throw error;
             }
             throw new Error(`Failed to connect to Figma API: ${error}`);
+        }
+    }
+    /**
+     * Get current user info (token identity).
+     */
+    async getMe() {
+        const url = `${this.baseUrl}/me`;
+        try {
+            const response = await this.requestWithTimeout(url, {
+                headers: {
+                    "X-Figma-Token": this.accessToken,
+                },
+            });
+            if (response.statusCode !== 200) {
+                const bodyText = await response.body.text();
+                const body = this.parseErrorBody(bodyText);
+                throw new FigmaApiError(body.err || `Failed to get user info (status ${response.statusCode})`, response.statusCode, body.code);
+            }
+            return await response.body.json();
+        }
+        catch (error) {
+            if (error instanceof FigmaApiError) {
+                throw error;
+            }
+            throw new Error(`Failed to get user info: ${error}`);
+        }
+    }
+    /**
+     * Check access to a file without loading full document.
+     */
+    async checkFileAccess(fileKey) {
+        const url = `${this.baseUrl}/files/${fileKey}?depth=1`;
+        try {
+            const response = await this.requestWithTimeout(url, {
+                headers: {
+                    "X-Figma-Token": this.accessToken,
+                },
+            });
+            if (response.statusCode === 200) {
+                await response.body.text();
+                return { statusCode: 200 };
+            }
+            const bodyText = await response.body.text();
+            const body = this.parseErrorBody(bodyText);
+            return {
+                statusCode: response.statusCode,
+                error: body.err || bodyText,
+                code: body.code,
+            };
+        }
+        catch (error) {
+            return {
+                statusCode: 0,
+                error: error instanceof Error ? error.message : String(error),
+            };
         }
     }
     /**

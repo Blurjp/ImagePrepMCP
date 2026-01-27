@@ -100,10 +100,23 @@ export declare class FigmaApiClient {
     private readonly baseUrl;
     constructor(accessToken: string, requestTimeoutMs?: number);
     private requestWithTimeout;
+    private parseErrorBody;
     /**
      * Get file information from Figma.
      */
     getFileInfo(fileKey: string): Promise<FigmaFileInfo>;
+    /**
+     * Get current user info (token identity).
+     */
+    getMe(): Promise<any>;
+    /**
+     * Check access to a file without loading full document.
+     */
+    checkFileAccess(fileKey: string): Promise<{
+        statusCode: number;
+        error?: string;
+        code?: string;
+    }>;
     /**
      * Get image export URL(s) for a specific node.
      */

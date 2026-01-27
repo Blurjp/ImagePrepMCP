@@ -106,7 +106,9 @@ https://www.figma.com/design/..."
 ┌─────────────────────────────┐
 │  Figma Smart Image Tools    │
 │  - process_figma_link       │
-│  - process_figma_frame      │
+│  - get_figma_components     │
+│  - get_figma_node_details   │
+│  - get_figma_variables      │
 │  - list_figma_frames        │
 └─────────────────────────────┘
 ```
@@ -114,47 +116,77 @@ https://www.figma.com/design/..."
 ## Available Tools
 
 ### `process_figma_link`
-Processes a Figma URL and returns tiled image data.
+Processes a Figma URL and exports images + tiles to disk.
 
 **Input:**
 ```json
 {
   "url": "https://www.figma.com/design/...",
-  "format": "png",  // or "svg"
-  "tiles": true     // enable auto-tiling
+  "out_dir": "/path/to/output",
+  "prefer_format": "webp"
 }
 ```
 
-**Returns:**
-- Base64 encoded image data (tiled if needed)
-- Frame metadata
-- Tile count and dimensions
-
-### `process_figma_frame`
-Accesses a specific frame by node ID.
+### `get_figma_components`
+Lists all components and component sets in a Figma file.
 
 **Input:**
 ```json
 {
-  "fileKey": "abc123",
-  "nodeId": "1:4",
-  "format": "svg"
+  "url": "https://www.figma.com/design/..."
+}
+```
+
+### `get_figma_node_details`
+Returns layout + styling details for a specific node.
+
+**Input:**
+```json
+{
+  "url": "https://www.figma.com/design/...?...&node-id=1-123"
+}
+```
+
+### `get_figma_variables`
+Returns design variables (requires Figma Pro plan or higher).
+
+**Input:**
+```json
+{
+  "url": "https://www.figma.com/design/..."
 }
 ```
 
 ### `list_figma_frames`
-Lists all frames in a Figma file.
+Lists top-level frames/components using a shallow fetch.
 
 **Input:**
 ```json
 {
-  "fileKey": "abc123"
+  "url": "https://www.figma.com/design/...",
+  "max_frames": 200
+}
+```
+
+### `debug_figma_access`
+Shows which Figma user the token belongs to and whether the file is accessible.
+
+**Input:**
+```json
+{
+  "url": "https://www.figma.com/design/..."
 }
 ```
 
 ## Authentication Flow (Technical Details)
 
-### OAuth Device Code Flow
+### OAuth Authorization Code + PKCE (Claude Desktop)
+
+Claude Desktop uses the authorization_code + PKCE flow. If the token isn't available yet,
+the server will redirect you to the home page to authenticate with Figma, then resume
+the OAuth redirect automatically.
+
+### OAuth Device Code Flow (Legacy CLI)
 
 The server uses the OAuth 2.0 Device Authorization Grant:
 
@@ -211,6 +243,13 @@ Content-Type: application/json
   "params": { ... }
 }
 ```
+
+## Timeouts
+
+- `MCP_TOOL_TIMEOUT_MS` / `FIGMA_TOOL_TIMEOUT_MS` (default: `60000`) controls total tool execution time.
+- `FIGMA_REQUEST_TIMEOUT_MS` controls individual Figma API + image download requests.
+
+**Recommendation**: For large Figma files, set both to `120000` (120s) to avoid timeouts.
 
 ## Local Development
 

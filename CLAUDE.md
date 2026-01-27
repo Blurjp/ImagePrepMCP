@@ -179,3 +179,64 @@ This allows MCP clients to auto-connect without manual authentication when OAuth
 
 **Last updated**: January 24, 2026
 **Deployment SHA**: fc33797
+
+## MCP Auth + Transport Lessons (Do Not Regress)
+
+### 1. Canonical Project
+- The only deployed code lives in `figma-smart-image-mcp/`.
+- Do not edit root-level app code (it was removed).
+
+### 2. Claude Desktop Uses Streamable HTTP + OAuth Code Flow
+- Claude’s built-in HTTP client uses **Streamable HTTP** and **OAuth authorization_code + PKCE**.
+- Device-code flow is insufficient alone.
+- Required endpoints:
+  - `/.well-known/oauth-protected-resource` (RFC 9728)
+  - `/.well-known/oauth-authorization-server`
+  - `/oauth/authorize` (handles MCP PKCE requests)
+  - `/oauth/token` (handles `authorization_code` + PKCE)
+- If missing, Claude will show “Auth: not authenticated”.
+
+### 3. Always Enforce OAuth on `/mcp`
+- Return `401` with `WWW-Authenticate: Bearer … resource_metadata=...` on **all** `/mcp` requests without Bearer token (including GET SSE).
+- This forces Claude to start OAuth instead of connecting unauthenticated.
+
+### 4. Streamable HTTP Must Be Stateless
+- `StreamableHTTPServerTransport` must be **stateless** (`sessionIdGenerator: undefined`).
+- Stateful mode causes “Server already initialized” and random failures.
+
+### 5. MCP OAuth Flow Bridges Figma OAuth
+- `/oauth/authorize`:
+  - If MCP `client_id` + `redirect_uri` present, mint short-lived **auth code** from existing Figma OAuth token in Redis.
+  - If no token, redirect to `/` with `?next=` to complete Figma login then resume.
+- `/oauth/token`:
+  - Verify PKCE and exchange auth code for access token.
+  - Store access token in Redis as key → Figma token for multi-tenant usage.
+
+### 6. Auth Page UX
+- The auth page should **not** say “Not connected” if OAuth token exists.
+- Page now fetches `/health` to show accurate state.
+- Fix JS top-level `return` errors (caused “Illegal return statement”).
+- The home page now resumes MCP OAuth automatically via `next` param.
+
+### 7. Figma 403 vs Timeout
+- **403** from Figma API means the token lacks access to the file.
+- Timeouts usually come from large files or root `node-id=0-1`.
+- Use a specific frame node-id or the `list_figma_frames` tool to avoid full file fetch.
+- If the user says their environment hasn't changed, assume token/account mismatch first and verify with `debug_figma_access`.
+
+### 8. New Tool: `list_figma_frames`
+- Uses `depth=2` to quickly list top-level frames/components with node IDs.
+- Helps avoid expensive full-file fetches.
+
+### 9. New Tool: `debug_figma_access`
+- Returns `/v1/me` (which Figma user the token belongs to) and a shallow file access check.
+- Use this when the user says “the file is mine but I still get 403”.
+- If `access.statusCode` is 403, the OAuth token is for a different Figma account or lacks file sharing access.
+
+### 10. Server Timeouts (Env)
+- `MCP_TOOL_TIMEOUT_MS` / `FIGMA_TOOL_TIMEOUT_MS` (default 60000) controls tool execution.
+- `FIGMA_REQUEST_TIMEOUT_MS` controls Figma API + image download timeout.
+
+### 11. Build Artifacts + Git Hygiene
+- Root `.gitignore` ignores root `/dist`, `/out`, and `node_modules/`.
+- Keep `figma-smart-image-mcp/dist` tracked.
