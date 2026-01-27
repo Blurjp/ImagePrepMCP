@@ -50,20 +50,18 @@ Create or update `.clauderc` in your project directory:
 }
 ```
 
-### Step 2: Get Your User Code
+### Step 2: Authenticate with Figma (Recommended)
 
-When you first use the MCP server, you'll need to authenticate:
+When you first use the MCP server, click **Authenticate** in Claude. The server will
+start Figma OAuth automatically and return you to Claude when finished.
 
-1. Visit **https://figma-smart-image-mcp-production.up.railway.app/**
-2. You'll see a user code (e.g., `ABC123`)
+### Step 3: (Optional) Manual Token Entry
 
-### Step 3: Authenticate with Figma
+If you prefer a Personal Access Token:
 
-1. Get your Figma Personal Access Token from [Figma Settings](https://www.figma.com/settings)
-2. On the authentication page, enter:
-   - **User Code**: The code displayed in step 2
-   - **Figma Token**: Your personal access token
-3. Click "Connect to Figma"
+1. Get a token from [Figma Settings](https://www.figma.com/settings)
+2. Open **https://figma-smart-image-mcp-production.up.railway.app/**
+3. Enter your token and click "Connect to Figma"
 
 ### Step 4: Start Using Claude
 
@@ -182,9 +180,8 @@ Shows which Figma user the token belongs to and whether the file is accessible.
 
 ### OAuth Authorization Code + PKCE (Claude Desktop)
 
-Claude Desktop uses the authorization_code + PKCE flow. If the token isn't available yet,
-the server will redirect you to the home page to authenticate with Figma, then resume
-the OAuth redirect automatically.
+Claude Desktop uses the authorization_code + PKCE flow. If no token is available yet,
+the server will redirect directly to Figma OAuth and resume automatically.
 
 ### OAuth Device Code Flow (Legacy CLI)
 
@@ -250,6 +247,39 @@ Content-Type: application/json
 - `FIGMA_REQUEST_TIMEOUT_MS` controls individual Figma API + image download requests.
 
 **Recommendation**: For large Figma files, set both to `120000` (120s) to avoid timeouts.
+
+## Troubleshooting
+
+### Invalid token / 403 from Figma
+
+If tools return `Invalid token` or `403`:
+
+1. Clear cached OAuth tokens:
+   ```bash
+   curl -s "https://figma-smart-image-mcp-production.up.railway.app/health?debug=clear_oauth"
+   ```
+2. Re-run **Authenticate** in Claude.
+3. Verify with:
+   ```
+   debug_figma_access
+   {"url":"https://www.figma.com/design/..."}
+   ```
+
+### Node-id format issues
+
+Figma URLs often encode or format node IDs differently. The server normalizes these, but you
+can also use one of these forms:
+
+- `node-id=1:1234`
+- `node-id=1-1234`
+- `node-id=1%3A1234` (URL-encoded)
+
+If you see `No image URL returned for node ...`, try a normalized `node-id` or use:
+
+```
+list_figma_frames
+{"url":"https://www.figma.com/design/..."}
+```
 
 ## Local Development
 
