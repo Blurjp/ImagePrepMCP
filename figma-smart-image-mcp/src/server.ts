@@ -204,7 +204,7 @@ class FigmaSmartImageServer {
   private transportMode: TransportMode;
   private sessionTransports: Map<string, any>;  // Track transports per session (in-memory, per-instance)
   private rateLimiter: RateLimiter;
-  private oauthStates: Map<string, { codeVerifier: string; redirectUri: string; createdAt: number }>;  // OAuth state management
+  private oauthStates: Map<string, { codeVerifier: string; redirectUri: string; createdAt: number; next?: string }>;  // OAuth state management
   private oauthAuthCodes: Map<string, { codeChallenge: string; codeChallengeMethod: string; redirectUri: string; clientId: string; figmaToken: string; createdAt: number }>;
 
   constructor(transportMode: TransportMode = "stdio") {
@@ -1027,6 +1027,33 @@ You can manually extract design tokens by:
     });
     await this.server.connect(streamableTransport);
 
+    const getBaseUrl = (req: IncomingMessage) => {
+      if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+      }
+      if (process.env.RAILWAY_STATIC_URL) {
+        return process.env.RAILWAY_STATIC_URL;
+      }
+      if (req.headers.host) {
+        const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
+        return `${protocol}://${req.headers.host}`;
+      }
+      return `http://localhost:${port}`;
+    };
+
+    const sanitizeNextUrl = (nextValue: string | null, baseUrl: string) => {
+      if (!nextValue) return null;
+      try {
+        const base = new URL(baseUrl);
+        const nextUrl = new URL(nextValue, base);
+        if (nextUrl.origin !== base.origin) return null;
+        if (nextUrl.pathname !== "/oauth/authorize") return null;
+        return nextUrl.toString();
+      } catch {
+        return null;
+      }
+    };
+
     const httpServer = createHttpServer(async (req, res) => {
       const url = new URL(req.url || "", `http://${req.headers.host}`);
 
@@ -1064,18 +1091,7 @@ You can manually extract design tokens by:
       // We provide minimal OAuth response for compatibility, but use simple token auth
       if (url.pathname === "/.well-known/oauth-authorization-server") {
         // Determine base URL from environment or request host
-        let baseUrl: string;
-        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-        } else if (process.env.RAILWAY_STATIC_URL) {
-          baseUrl = process.env.RAILWAY_STATIC_URL;
-        } else if (req.headers.host) {
-          // Use request host header - prefer x-forwarded-proto for Railway/proxy deployments
-          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-          baseUrl = `${protocol}://${req.headers.host}`;
-        } else {
-          baseUrl = `http://localhost:${port}`;
-        }
+        const baseUrl = getBaseUrl(req);
 
         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({
@@ -1094,17 +1110,7 @@ You can manually extract design tokens by:
 
       // OAuth protected resource metadata (RFC 9728)
       if (url.pathname === "/.well-known/oauth-protected-resource") {
-        let baseUrl: string;
-        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-        } else if (process.env.RAILWAY_STATIC_URL) {
-          baseUrl = process.env.RAILWAY_STATIC_URL;
-        } else if (req.headers.host) {
-          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-          baseUrl = `${protocol}://${req.headers.host}`;
-        } else {
-          baseUrl = `http://localhost:${port}`;
-        }
+        const baseUrl = getBaseUrl(req);
 
         res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
         res.end(JSON.stringify({
@@ -1144,15 +1150,7 @@ You can manually extract design tokens by:
               figmaToken: hasOAuthToken ? mostRecent.value.token : this.figmaToken,
             });
 
-            let baseUrl: string;
-            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-              baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-            } else if (req.headers.host) {
-              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-              baseUrl = `${protocol}://${req.headers.host}`;
-            } else {
-              baseUrl = `http://localhost:${port}`;
-            }
+            const baseUrl = getBaseUrl(req);
 
             res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
             res.end(JSON.stringify({
@@ -1405,15 +1403,7 @@ You can manually extract design tokens by:
             });
 
             // Use Railway domain if available, otherwise from request host
-            let baseUrl: string;
-            if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-              baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-            } else if (req.headers.host) {
-              const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-              baseUrl = `${protocol}://${req.headers.host}`;
-            } else {
-              baseUrl = `http://localhost:${port}`;
-            }
+            const baseUrl = getBaseUrl(req);
 
             res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders });
             res.end(JSON.stringify({
@@ -1662,8 +1652,11 @@ You can manually extract design tokens by:
           const mostRecent = await sessionTokensStorage.getMostRecent();
           const token = mostRecent?.value?.token || this.figmaToken;
           if (!token) {
-            res.writeHead(403, { "Content-Type": "text/html" });
-            res.end("<html><body><h1>Not authenticated</h1><p>Please authenticate with Figma at the home page, then retry.</p></body></html>");
+            const baseUrl = getBaseUrl(req);
+            const next = sanitizeNextUrl(new URL(req.url || "", baseUrl).toString(), baseUrl);
+            const redirectTarget = next ? `/?next=${encodeURIComponent(next)}` : "/";
+            res.writeHead(302, { Location: redirectTarget });
+            res.end();
             return;
           }
 
@@ -1694,15 +1687,8 @@ You can manually extract design tokens by:
           return;
         }
 
-        let baseUrl: string;
-        if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-          baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-        } else if (req.headers.host) {
-          const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-          baseUrl = `${protocol}://${req.headers.host}`;
-        } else {
-          baseUrl = `http://localhost:${HTTP_PORT}`;
-        }
+        const baseUrl = getBaseUrl(req);
+        const nextParam = sanitizeNextUrl(url.searchParams.get("next"), baseUrl);
 
         const redirectUri = `${baseUrl}/oauth/callback`;
         const codeVerifier = this.generateCodeVerifier();
@@ -1713,6 +1699,7 @@ You can manually extract design tokens by:
           codeVerifier,
           redirectUri,
           createdAt: Date.now(),
+          next: nextParam || undefined,
         });
 
         // Generate code challenge
@@ -1781,12 +1768,14 @@ You can manually extract design tokens by:
           await sessionTokensStorage.set(state, sessionData);
 
           // Redirect back to auth page with success
-          res.writeHead(302, { Location: `/?oauth=success&session=${state}` });
+          const nextParam = oauthState.next ? `&next=${encodeURIComponent(oauthState.next)}` : "";
+          res.writeHead(302, { Location: `/?oauth=success&session=${state}${nextParam}` });
           res.end();
         } catch (error) {
           console.error("[OAuth Callback] Error:", error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-          res.writeHead(302, { Location: `/?error=${encodeURIComponent(errorMessage)}` });
+          const nextParam = oauthState.next ? `&next=${encodeURIComponent(oauthState.next)}` : "";
+          res.writeHead(302, { Location: `/?error=${encodeURIComponent(errorMessage)}${nextParam}` });
           res.end();
         }
         return;
@@ -1889,17 +1878,7 @@ You can manually extract design tokens by:
         const authHeader = req.headers.authorization;
         const oauthEnabled = !!process.env.FIGMA_CLIENT_ID;
         if (oauthEnabled && (!authHeader || !authHeader.startsWith('Bearer '))) {
-          let baseUrl: string;
-          if (process.env.RAILWAY_PUBLIC_DOMAIN) {
-            baseUrl = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
-          } else if (process.env.RAILWAY_STATIC_URL) {
-            baseUrl = process.env.RAILWAY_STATIC_URL;
-          } else if (req.headers.host) {
-            const protocol = req.headers['x-forwarded-proto'] || ((req.connection as any).encrypted ? 'https' : 'http');
-            baseUrl = `${protocol}://${req.headers.host}`;
-          } else {
-            baseUrl = `http://localhost:${port}`;
-          }
+          const baseUrl = getBaseUrl(req);
 
           res.writeHead(401, {
             "Content-Type": "application/json",
@@ -2654,6 +2633,11 @@ https://www.figma.com/design/abc123/..."</div>
     const oauthSuccess = urlParams.get('oauth');
     const oauthError = urlParams.get('error');
     const oauthSession = urlParams.get('session');
+    const nextParam = urlParams.get('next');
+    const oauthLink = document.querySelector('.oauth-button');
+    if (oauthLink && nextParam) {
+      oauthLink.setAttribute('href', '/oauth/authorize?next=' + encodeURIComponent(nextParam));
+    }
 
     if (oauthSuccess === 'success' && oauthSession) {
       // OAuth was successful
@@ -2668,6 +2652,11 @@ https://www.figma.com/design/abc123/..."</div>
       if (statusDiv) {
         statusDiv.innerHTML = '<div class="status-dot" style="background: #4ade80"></div><span>Connected to Figma via OAuth</span>';
         statusDiv.style.background = '#2d6a4f';
+      }
+
+      if (nextParam) {
+        window.location.href = nextParam;
+        return;
       }
 
       // Clean URL
