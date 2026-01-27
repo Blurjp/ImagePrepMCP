@@ -9,7 +9,9 @@ export interface ExportedImage {
 }
 export declare class FigmaExporter {
     private readonly api;
-    constructor(api: FigmaApiClient);
+    private readonly requestTimeoutMs;
+    constructor(api: FigmaApiClient, requestTimeoutMs?: number);
+    private requestWithTimeout;
     /**
      * Download an image from a URL to a local file.
      */

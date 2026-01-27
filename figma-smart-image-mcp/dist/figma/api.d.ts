@@ -96,8 +96,10 @@ export declare class FigmaApiError extends Error {
 }
 export declare class FigmaApiClient {
     private readonly accessToken;
+    private readonly requestTimeoutMs;
     private readonly baseUrl;
-    constructor(accessToken: string);
+    constructor(accessToken: string, requestTimeoutMs?: number);
+    private requestWithTimeout;
     /**
      * Get file information from Figma.
      */
@@ -118,6 +120,16 @@ export declare class FigmaApiClient {
      * Get node info from the file.
      */
     getNodeInfo(fileKey: string, nodeId: string): Promise<FigmaNode>;
+    /**
+     * List top-level frames (depth=2) for quick node selection.
+     */
+    listTopLevelFrames(fileKey: string): Promise<Array<{
+        pageId: string;
+        pageName: string;
+        id: string;
+        name: string;
+        type: string;
+    }>>;
     /**
      * Get all components from the file
      */

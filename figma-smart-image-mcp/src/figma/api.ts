@@ -103,7 +103,29 @@ export class FigmaApiError extends Error {
 export class FigmaApiClient {
   private readonly baseUrl = "https://api.figma.com/v1";
 
-  constructor(private readonly accessToken: string) {}
+  constructor(
+    private readonly accessToken: string,
+    private readonly requestTimeoutMs: number = 60000
+  ) {}
+
+  private async requestWithTimeout(url: string, options: any) {
+    const controller = new AbortController();
+    const timeoutMs = this.requestTimeoutMs;
+    const timeoutId = timeoutMs > 0
+      ? setTimeout(() => controller.abort(new Error("Figma API request timed out")), timeoutMs)
+      : null;
+
+    try {
+      return await request(url, {
+        ...options,
+        signal: controller.signal,
+      });
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
 
   /**
    * Get file information from Figma.
@@ -112,7 +134,7 @@ export class FigmaApiClient {
     const url = `${this.baseUrl}/files/${fileKey}`;
 
     try {
-      const response = await request(url, {
+      const response = await this.requestWithTimeout(url, {
         headers: {
           "X-Figma-Token": this.accessToken,
         },
@@ -148,7 +170,7 @@ export class FigmaApiClient {
     const url = `${this.baseUrl}/images/${fileKey}?ids=${nodeId}&format=${format}&svg_outline_text=false`;
 
     try {
-      const response = await request(url, {
+      const response = await this.requestWithTimeout(url, {
         headers: {
           "X-Figma-Token": this.accessToken,
         },
@@ -231,7 +253,7 @@ export class FigmaApiClient {
     const url = `${this.baseUrl}/files/${fileKey}/nodes?ids=${nodeId}`;
 
     try {
-      const response = await request(url, {
+      const response = await this.requestWithTimeout(url, {
         headers: {
           "X-Figma-Token": this.accessToken,
         },
@@ -258,6 +280,61 @@ export class FigmaApiClient {
         throw error;
       }
       throw new Error(`Failed to get node info: ${error}`);
+    }
+  }
+
+  /**
+   * List top-level frames (depth=2) for quick node selection.
+   */
+  async listTopLevelFrames(fileKey: string): Promise<Array<{ pageId: string; pageName: string; id: string; name: string; type: string }>> {
+    const url = `${this.baseUrl}/files/${fileKey}?depth=2`;
+
+    try {
+      const response = await this.requestWithTimeout(url, {
+        headers: {
+          "X-Figma-Token": this.accessToken,
+        },
+      });
+
+      if (response.statusCode !== 200) {
+        const body = await response.body.text() as any;
+        throw new FigmaApiError(
+          body.err || `Failed to list frames (status ${response.statusCode})`,
+          response.statusCode,
+          body.code
+        );
+      }
+
+      const data = await response.body.json() as any;
+      const doc = data?.document;
+      if (!doc?.children) {
+        return [];
+      }
+
+      const allowedTypes = new Set(["FRAME", "COMPONENT", "COMPONENT_SET", "INSTANCE", "SECTION"]);
+      const results: Array<{ pageId: string; pageName: string; id: string; name: string; type: string }> = [];
+
+      for (const page of doc.children) {
+        if (!page?.children) continue;
+        for (const node of page.children) {
+          if (allowedTypes.has(node.type)) {
+            results.push({
+              pageId: page.id,
+              pageName: page.name,
+              id: node.id,
+              name: node.name,
+              type: node.type,
+            });
+          }
+        }
+      }
+
+      return results;
+    } catch (error) {
+      if (error instanceof FigmaApiError) {
+        throw error;
+      }
+      throw new Error(`Failed to list frames: ${error}`);
     }
   }
 
@@ -382,7 +459,7 @@ export class FigmaApiClient {
     const url = `${this.baseUrl}/files/${fileKey}/variables/local`;
 
     try {
-      const response = await request(url, {
+      const response = await this.requestWithTimeout(url, {
         headers: {
           "X-Figma-Token": this.accessToken,
         },

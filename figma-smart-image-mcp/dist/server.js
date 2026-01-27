@@ -47,6 +47,10 @@ const GetFigmaNodeDetailsInputSchema = z.object({
 const GetFigmaVariablesInputSchema = z.object({
     url: z.string().url("Must be a valid Figma URL"),
 });
+const ListFigmaFramesInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL"),
+    max_frames: z.number().int().positive().optional(),
+});
 // Default constants
 const DEFAULT_MAX_BYTES = 4_000_000; // 4MB
 const DEFAULT_MAX_LONG_EDGE = 4096;
@@ -169,6 +173,8 @@ class FigmaSmartImageServer {
     rateLimiter;
     oauthStates; // OAuth state management
     oauthAuthCodes;
+    toolTimeoutMs;
+    figmaRequestTimeoutMs;
     constructor(transportMode = "stdio") {
         this.transportMode = transportMode;
         // Load token from: 1) Environment variable, 2) File, 3) Empty
@@ -176,6 +182,8 @@ class FigmaSmartImageServer {
         this.sessionTransports = new Map();
         this.oauthStates = new Map();
         this.oauthAuthCodes = new Map();
+        this.toolTimeoutMs = parseInt(process.env.MCP_TOOL_TIMEOUT_MS || process.env.FIGMA_TOOL_TIMEOUT_MS || "60000", 10);
+        this.figmaRequestTimeoutMs = parseInt(process.env.FIGMA_REQUEST_TIMEOUT_MS || String(this.toolTimeoutMs), 10);
         // Rate limiting: 100 requests per minute per IP
         this.rateLimiter = new RateLimiter(100, 60000);
         // Initialize Redis connection
@@ -244,6 +252,25 @@ class FigmaSmartImageServer {
             }
         }
     }
+    async withTimeout(promise, timeoutMs, label) {
+        if (!timeoutMs || timeoutMs <= 0) {
+            return promise;
+        }
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+                reject(new Error(`Timed out after ${timeoutMs}ms (${label})`));
+            }, timeoutMs);
+        });
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        }
+        finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
+    }
     setupHandlers() {
         this.server.setRequestHandler(ListToolsRequestSchema, async () => {
             return {
@@ -308,23 +335,54 @@ class FigmaSmartImageServer {
                             required: ["url"],
                         },
                     },
+                    {
+                        name: "list_figma_frames",
+                        description: "List top-level frames/components in a Figma file using a shallow fetch. " +
+                            "Use this to find a specific node-id before calling other tools.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma file URL" },
+                                max_frames: { type: "number", description: "Max frames to return (default 200)" },
+                            },
+                            required: ["url"],
+                        },
+                    },
                 ],
             };
         });
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-            if (request.params.name === "process_figma_link") {
-                return await this.handleProcessFigmaLink(request.params.arguments);
+            const toolName = request.params.name;
+            const runTool = async () => {
+                if (toolName === "process_figma_link") {
+                    return await this.handleProcessFigmaLink(request.params.arguments);
+                }
+                if (toolName === "get_figma_components") {
+                    return await this.handleGetFigmaComponents(request.params.arguments);
+                }
+                if (toolName === "get_figma_node_details") {
+                    return await this.handleGetFigmaNodeDetails(request.params.arguments);
+                }
+                if (toolName === "get_figma_variables") {
+                    return await this.handleGetFigmaVariables(request.params.arguments);
+                }
+                if (toolName === "list_figma_frames") {
+                    return await this.handleListFigmaFrames(request.params.arguments);
+                }
+                throw new Error(`Unknown tool: ${toolName}`);
+            };
+            try {
+                return await this.withTimeout(runTool(), this.toolTimeoutMs, toolName);
             }
-            if (request.params.name === "get_figma_components") {
-                return await this.handleGetFigmaComponents(request.params.arguments);
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return {
+                    content: [
+                        { type: "text", text: `Error: ${message}` },
+                    ],
+                    isError: true,
+                };
             }
-            if (request.params.name === "get_figma_node_details") {
-                return await this.handleGetFigmaNodeDetails(request.params.arguments);
-            }
-            if (request.params.name === "get_figma_variables") {
-                return await this.handleGetFigmaVariables(request.params.arguments);
-            }
-            throw new Error(`Unknown tool: ${request.params.name}`);
         });
     }
     async handleProcessFigmaLink(args) {
@@ -365,8 +423,8 @@ class FigmaSmartImageServer {
             // Set up output directory
             const outputDir = out_dir || generateOutputDir();
             // Initialize clients with session-specific token
-            const api = new FigmaApiClient(token);
-            const exporter = new FigmaExporter(api);
+            const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
+            const exporter = new FigmaExporter(api, this.figmaRequestTimeoutMs);
             const encoder = new ImageEncoder();
             const tiler = new ImageTiler(encoder);
             const cropper = new ImageCropper(encoder);
@@ -588,7 +646,7 @@ class FigmaSmartImageServer {
             }
             // Parse Figma URL
             const parsed = FigmaLinkParser.parse(args.url);
-            const api = new FigmaApiClient(token);
+            const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
             // Get components and component sets
             const components = await api.getComponents(parsed.fileKey);
             const componentSets = await api.getComponentSets(parsed.fileKey);
@@ -663,7 +721,7 @@ class FigmaSmartImageServer {
             if (!parsed.nodeId) {
                 throw new Error("Node ID is required. Please provide a Figma URL with node-id parameter.");
             }
-            const api = new FigmaApiClient(token);
+            const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
             // Get node details
             const details = await api.getNodeDetails(parsed.fileKey, parsed.nodeId);
             // Format output
@@ -759,7 +817,7 @@ class FigmaSmartImageServer {
             }
             // Parse Figma URL
             const parsed = FigmaLinkParser.parse(args.url);
-            const api = new FigmaApiClient(token);
+            const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
             // Get variables
             const variablesData = await api.getVariables(parsed.fileKey);
             // Format output
@@ -856,6 +914,48 @@ You can manually extract design tokens by:
                     isError: false, // Not a hard error, just a limitation
                 };
             }
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleListFigmaFrames(args) {
+        try {
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                throw new Error("No Figma token available. Please authenticate first.");
+            }
+            const validated = ListFigmaFramesInputSchema.parse(args);
+            const parsed = FigmaLinkParser.parse(validated.url);
+            const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
+            const frames = await api.listTopLevelFrames(parsed.fileKey);
+            const maxFrames = validated.max_frames ?? 200;
+            const limited = frames.slice(0, maxFrames);
+            const output = {
+                fileKey: parsed.fileKey,
+                totalFrames: frames.length,
+                returned: limited.length,
+                frames: limited,
+                note: "Use the node id in a URL like: https://www.figma.com/design/<fileKey>?node-id=<id>",
+            };
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: JSON.stringify(output, null, 2),
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
             return {
                 content: [
                     {

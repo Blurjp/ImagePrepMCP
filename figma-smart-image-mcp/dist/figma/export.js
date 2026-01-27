@@ -7,19 +7,37 @@ import { join } from "path";
 import { existsSync } from "fs";
 export class FigmaExporter {
     api;
-    constructor(api) {
+    requestTimeoutMs;
+    constructor(api, requestTimeoutMs = 60000) {
         this.api = api;
+        this.requestTimeoutMs = requestTimeoutMs;
+    }
+    async requestWithTimeout(url) {
+        const controller = new AbortController();
+        const timeoutMs = this.requestTimeoutMs;
+        const timeoutId = timeoutMs > 0
+            ? setTimeout(() => controller.abort(new Error("Image download timed out")), timeoutMs)
+            : null;
+        try {
+            return await request(url, {
+                method: "GET",
+                headers: {
+                    "User-Agent": "FigmaSmartImageMCP/1.0 (https://github.com/anthropics/claude-code)",
+                },
+                signal: controller.signal,
+            });
+        }
+        finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
     }
     /**
      * Download an image from a URL to a local file.
      */
     async downloadImage(url, outputPath) {
-        const response = await request(url, {
-            method: "GET",
-            headers: {
-                "User-Agent": "FigmaSmartImageMCP/1.0 (https://github.com/anthropics/claude-code)",
-            },
-        });
+        const response = await this.requestWithTimeout(url);
         if (response.statusCode !== 200) {
             throw new Error(`Failed to download image (status ${response.statusCode})`);
         }

@@ -16,6 +16,8 @@ declare class FigmaSmartImageServer {
     private rateLimiter;
     private oauthStates;
     private oauthAuthCodes;
+    private toolTimeoutMs;
+    private figmaRequestTimeoutMs;
     constructor(transportMode?: TransportMode);
     /**
      * Get token for a specific session
@@ -27,11 +29,13 @@ declare class FigmaSmartImageServer {
      * Note: Redis handles TTL automatically, this is for in-memory fallback
      */
     private cleanupExpiredSessions;
+    private withTimeout;
     private setupHandlers;
     private handleProcessFigmaLink;
     private handleGetFigmaComponents;
     private handleGetFigmaNodeDetails;
     private handleGetFigmaVariables;
+    private handleListFigmaFrames;
     runStdio(): Promise<void>;
     runHttp(port: number): Promise<void>;
     private generateCodeVerifier;
