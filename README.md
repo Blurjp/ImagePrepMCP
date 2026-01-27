@@ -54,6 +54,7 @@ Create or update `.clauderc` in your project directory:
 
 When you first use the MCP server, click **Authenticate** in Claude. The server will
 start Figma OAuth automatically and return you to Claude when finished.
+If Claude later shows **Auth: not authenticated**, just click **Authenticate** again to re-authorize.
 
 ### Step 3: (Optional) Manual Token Entry
 

@@ -30,6 +30,8 @@ declare class FigmaSmartImageServer {
      */
     private cleanupExpiredSessions;
     private withTimeout;
+    private isAuthError;
+    private authErrorResponse;
     private setupHandlers;
     private handleProcessFigmaLink;
     private handleGetFigmaComponents;

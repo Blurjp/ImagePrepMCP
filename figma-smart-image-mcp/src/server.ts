@@ -25,7 +25,7 @@ import { join, dirname } from "path";
 import { homedir } from "os";
 
 import { FigmaLinkParser } from "./figma/parse_link.js";
-import { FigmaApiClient } from "./figma/api.js";
+import { FigmaApiClient, FigmaApiError } from "./figma/api.js";
 import { FigmaExporter } from "./figma/export.js";
 import { ImageEncoder } from "./image/encode.js";
 import { ImageTiler } from "./image/tiles.js";
@@ -331,6 +331,33 @@ class FigmaSmartImageServer {
     }
   }
 
+  private isAuthError(error: unknown): boolean {
+    if (error instanceof FigmaApiError) {
+      return error.statusCode === 401 || error.statusCode === 403;
+    }
+    if (error instanceof Error) {
+      return /invalid token|unauthorized|forbidden/i.test(error.message);
+    }
+    return false;
+  }
+
+  private authErrorResponse(detail?: string) {
+    const message = detail
+      ? `Authentication required. ${detail}`
+      : "Authentication required.";
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `${message}\n` +
+            `Please click **Authenticate** in Claude to re-authorize, then retry the tool.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
   private setupHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
@@ -480,15 +507,7 @@ class FigmaSmartImageServer {
     const token = await this.getTokenForSession(sessionId || "");
 
     if (!token) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Figma token is not configured. Please visit the authentication page to set your Figma access token.",
-          },
-        ],
-        isError: true,
-      };
+      return this.authErrorResponse();
     }
 
     try {
@@ -754,6 +773,9 @@ class FigmaSmartImageServer {
         ],
       };
     } catch (error) {
+      if (this.isAuthError(error)) {
+        return this.authErrorResponse("Your Figma authorization is missing or expired.");
+      }
       return {
         content: [
           {
@@ -773,7 +795,7 @@ class FigmaSmartImageServer {
       const token = await this.getTokenForSession(sessionId || "");
 
       if (!token) {
-        throw new Error("No Figma token available. Please authenticate first.");
+        return this.authErrorResponse();
       }
 
       // Parse Figma URL
@@ -833,6 +855,9 @@ class FigmaSmartImageServer {
         ],
       };
     } catch (error) {
+      if (this.isAuthError(error)) {
+        return this.authErrorResponse("Your Figma authorization is missing or expired.");
+      }
       return {
         content: [
           {
@@ -852,7 +877,7 @@ class FigmaSmartImageServer {
       const token = await this.getTokenForSession(sessionId || "");
 
       if (!token) {
-        throw new Error("No Figma token available. Please authenticate first.");
+        return this.authErrorResponse();
       }
 
       // Parse Figma URL
@@ -947,6 +972,9 @@ class FigmaSmartImageServer {
         ],
       };
     } catch (error) {
+      if (this.isAuthError(error)) {
+        return this.authErrorResponse("Your Figma authorization is missing or expired.");
+      }
       return {
         content: [
           {
@@ -966,7 +994,7 @@ class FigmaSmartImageServer {
       const token = await this.getTokenForSession(sessionId || "");
 
       if (!token) {
-        throw new Error("No Figma token available. Please authenticate first.");
+        return this.authErrorResponse();
       }
 
       // Parse Figma URL
@@ -1040,6 +1068,9 @@ class FigmaSmartImageServer {
         ],
       };
     } catch (error) {
+      if (this.isAuthError(error)) {
+        return this.authErrorResponse("Your Figma authorization is missing or expired.");
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Check if it's a 403 error (Starter Plan doesn't support Variables API)
@@ -1095,7 +1126,7 @@ You can manually extract design tokens by:
       const token = await this.getTokenForSession(sessionId || "");
 
       if (!token) {
-        throw new Error("No Figma token available. Please authenticate first.");
+        return this.authErrorResponse();
       }
 
       const validated = ListFigmaFramesInputSchema.parse(args);
@@ -1123,6 +1154,9 @@ You can manually extract design tokens by:
         ],
       };
     } catch (error) {
+      if (this.isAuthError(error)) {
+        return this.authErrorResponse("Your Figma authorization is missing or expired.");
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
         content: [
@@ -1142,7 +1176,7 @@ You can manually extract design tokens by:
       const token = await this.getTokenForSession(sessionId || "");
 
       if (!token) {
-        throw new Error("No Figma token available. Please authenticate first.");
+        return this.authErrorResponse();
       }
 
       const validated = DebugFigmaAccessInputSchema.parse(args);
@@ -1176,6 +1210,9 @@ You can manually extract design tokens by:
         ],
       };
     } catch (error) {
+      if (this.isAuthError(error)) {
+        return this.authErrorResponse("Your Figma authorization is missing or expired.");
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
         content: [
@@ -2087,7 +2124,10 @@ You can manually extract design tokens by:
             "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept, Mcp-Session-Id, Mcp-Protocol-Version",
             "WWW-Authenticate": `Bearer realm=\"mcp\", resource_metadata=\"${baseUrl}/.well-known/oauth-protected-resource\"`,
           });
-          res.end(JSON.stringify({ error: "unauthorized" }));
+          res.end(JSON.stringify({
+            error: "unauthorized",
+            error_description: "Authentication required. Click Authenticate in Claude and retry.",
+          }));
           return;
         }
 
