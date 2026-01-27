@@ -225,6 +225,7 @@ This allows MCP clients to auto-connect without manual authentication when OAuth
 - Use a specific frame node-id or the `list_figma_frames` tool to avoid full file fetch.
 - If the user says their environment hasn't changed, assume token/account mismatch first and verify with `debug_figma_access`.
 - OAuth access tokens must be sent as `Authorization: Bearer <token>` (server now sends both headers for safety).
+- Figma URLs often encode node IDs (e.g. `1%3A1235`) or use dashed form (`1-1235`); normalize to `1:1235` to avoid “No image URL returned” errors.
 
 ### 8. New Tool: `list_figma_frames`
 - Uses `depth=2` to quickly list top-level frames/components with node IDs.
