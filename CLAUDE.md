@@ -217,6 +217,7 @@ This allows MCP clients to auto-connect without manual authentication when OAuth
 - Page now fetches `/health` to show accurate state.
 - Fix JS top-level `return` errors (caused “Illegal return statement”).
 - The home page now resumes MCP OAuth automatically via `next` param.
+- MCP `/oauth/authorize` now **auto-starts Figma OAuth** when no token, so users don’t have to manually open the home page.
 
 ### 7. Figma 403 vs Timeout
 - **403** from Figma API means the token lacks access to the file.

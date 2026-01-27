@@ -1851,8 +1851,11 @@ You can manually extract design tokens by:
           if (!token) {
             const baseUrl = getBaseUrl(req);
             const next = sanitizeNextUrl(new URL(req.url || "", baseUrl).toString(), baseUrl);
-            const redirectTarget = next ? `/?next=${encodeURIComponent(next)}` : "/";
-            res.writeHead(302, { Location: redirectTarget });
+            const startOAuth = new URL("/oauth/authorize", baseUrl);
+            if (next) {
+              startOAuth.searchParams.set("next", next);
+            }
+            res.writeHead(302, { Location: startOAuth.toString() });
             res.end();
             return;
           }
