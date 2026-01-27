@@ -108,6 +108,13 @@ export class FigmaApiClient {
     private readonly requestTimeoutMs: number = 60000
   ) {}
 
+  private buildAuthHeaders(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.accessToken}`,
+      "X-Figma-Token": this.accessToken,
+    };
+  }
+
   private async requestWithTimeout(url: string, options: any) {
     const controller = new AbortController();
     const timeoutMs = this.requestTimeoutMs;
@@ -151,7 +158,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 
@@ -183,7 +190,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 
@@ -215,7 +222,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 
@@ -252,7 +259,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 
@@ -335,7 +342,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 
@@ -372,7 +379,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 
@@ -541,7 +548,7 @@ export class FigmaApiClient {
     try {
       const response = await this.requestWithTimeout(url, {
         headers: {
-          "X-Figma-Token": this.accessToken,
+          ...this.buildAuthHeaders(),
         },
       });
 

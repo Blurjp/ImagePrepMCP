@@ -99,6 +99,7 @@ export declare class FigmaApiClient {
     private readonly requestTimeoutMs;
     private readonly baseUrl;
     constructor(accessToken: string, requestTimeoutMs?: number);
+    private buildAuthHeaders;
     private requestWithTimeout;
     private parseErrorBody;
     /**

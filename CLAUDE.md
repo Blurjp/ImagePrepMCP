@@ -224,6 +224,7 @@ This allows MCP clients to auto-connect without manual authentication when OAuth
 - Timeouts usually come from large files or root `node-id=0-1`.
 - Use a specific frame node-id or the `list_figma_frames` tool to avoid full file fetch.
 - If the user says their environment hasn't changed, assume token/account mismatch first and verify with `debug_figma_access`.
+- OAuth access tokens must be sent as `Authorization: Bearer <token>` (server now sends both headers for safety).
 
 ### 8. New Tool: `list_figma_frames`
 - Uses `depth=2` to quickly list top-level frames/components with node IDs.

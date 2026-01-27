@@ -21,6 +21,12 @@ export class FigmaApiClient {
         this.accessToken = accessToken;
         this.requestTimeoutMs = requestTimeoutMs;
     }
+    buildAuthHeaders() {
+        return {
+            Authorization: `Bearer ${this.accessToken}`,
+            "X-Figma-Token": this.accessToken,
+        };
+    }
     async requestWithTimeout(url, options) {
         const controller = new AbortController();
         const timeoutMs = this.requestTimeoutMs;
@@ -62,7 +68,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode !== 200) {
@@ -87,7 +93,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode !== 200) {
@@ -112,7 +118,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode === 200) {
@@ -142,7 +148,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode !== 200) {
@@ -206,7 +212,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode !== 200) {
@@ -234,7 +240,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode !== 200) {
@@ -376,7 +382,7 @@ export class FigmaApiClient {
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {
-                    "X-Figma-Token": this.accessToken,
+                    ...this.buildAuthHeaders(),
                 },
             });
             if (response.statusCode !== 200) {
