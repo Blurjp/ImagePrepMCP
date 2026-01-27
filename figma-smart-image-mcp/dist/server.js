@@ -2484,11 +2484,10 @@ https://www.figma.com/design/abc123/..."</div>
 
       if (nextParam) {
         window.location.href = nextParam;
-        return;
+      } else {
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
-
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
     }
 
     if (oauthError) {
