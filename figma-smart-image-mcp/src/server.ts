@@ -269,27 +269,37 @@ class FigmaSmartImageServer {
    * Returns session token if available, otherwise falls back to most recent OAuth token, then global token
    */
   private async getTokenForSession(sessionId: string): Promise<string> {
+    console.error(`[Auth] Getting token for session: ${sessionId || "(empty)"}`);
+
     // Check session tokens in Redis for this specific session
     const sessionData = await sessionTokensStorage.get(sessionId);
     if (sessionData?.token) {
+      console.error(`[Auth] ✓ Found session token for session: ${sessionId}`);
       return sessionData.token;
     }
 
     // Check device codes in Redis (for OAuth flow)
     const deviceData = await deviceCodesStorage.get(sessionId);
     if (deviceData?.figmaToken) {
+      console.error(`[Auth] ✓ Found device code token for session: ${sessionId}`);
       return deviceData.figmaToken;
     }
 
     // Fall back to most recent OAuth token from any session
     const mostRecent = await sessionTokensStorage.getMostRecent();
     if (mostRecent?.value?.token) {
-      console.error(`[Auth] Using most recent OAuth token for session ${sessionId}`);
+      console.error(`[Auth] ✓ Using most recent OAuth token for session ${sessionId} (from: ${mostRecent.key})`);
       return mostRecent.value.token;
     }
 
     // Fall back to global token (for local dev)
-    return this.figmaToken;
+    if (this.figmaToken) {
+      console.error(`[Auth] ✓ Using global token (env/file)`);
+      return this.figmaToken;
+    }
+
+    console.error(`[Auth] ✗ NO TOKEN FOUND for session: ${sessionId}`);
+    return "";
   }
 
   /**
