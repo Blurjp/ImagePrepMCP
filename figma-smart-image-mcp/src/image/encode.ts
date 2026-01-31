@@ -6,7 +6,7 @@
 import sharp from "sharp";
 import { mkdir } from "fs/promises";
 import { join, dirname } from "path";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { createRequire } from "module";
 
 const nodeRequire = createRequire(import.meta.url);
@@ -238,7 +238,6 @@ export class ImageEncoder {
         }
 
         // Write PNG buffer to file
-        const { writeFileSync } = require("fs");
         writeFileSync(pngPath, buffer);
 
         resolve({ width: targetWidth, height: targetHeight });
