@@ -21,6 +21,7 @@ import { z } from "zod";
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from "http";
 import { URL } from "url";
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, existsSync } from "fs";
+import { readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { homedir } from "os";
 
@@ -788,13 +789,45 @@ class FigmaSmartImageServer {
 
       responseText += `\nManifest: ${getDisplayPath(manifestPath)}\n`;
 
+      // For HTTP transport, include images as base64 resources so they're accessible
+      const content: any[] = [
+        {
+          type: "text",
+          text: responseText,
+        },
+      ];
+
+      // Add overview image
+      try {
+        const overviewData = await readFile(overview.path);
+        const overviewBase64 = overviewData.toString('base64');
+        content.push({
+          type: "image",
+          data: overviewBase64,
+          mimeType: `image/${overview.format}`,
+        });
+      } catch (error) {
+        console.error(`Failed to read overview image: ${error}`);
+      }
+
+      // Add first few tiles
+      const maxTilesToInclude = Math.min(6, tiles.length);
+      for (let i = 0; i < maxTilesToInclude; i++) {
+        try {
+          const tileData = await readFile(tiles[i].path);
+          const tileBase64 = tileData.toString('base64');
+          content.push({
+            type: "image",
+            data: tileBase64,
+            mimeType: `image/${overview.format}`,
+          });
+        } catch (error) {
+          console.error(`Failed to read tile ${i}: ${error}`);
+        }
+      }
+
       return {
-        content: [
-          {
-            type: "text",
-            text: responseText,
-          },
-        ],
+        content,
       };
     } catch (error) {
       if (this.isAuthError(error)) {
