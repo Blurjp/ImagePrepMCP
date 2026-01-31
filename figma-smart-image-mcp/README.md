@@ -80,9 +80,36 @@ The service is deployed at: **https://figma-smart-image-mcp-production.up.railwa
 
 ### Add to Claude (for users)
 
+**Quick Add (Command Line)**:
 ```bash
 claude mcp add --transport http figma-smart-image https://figma-smart-image-mcp-production.up.railway.app/mcp
 ```
+
+**Recommended: Manual Configuration with Timeout**
+
+For better reliability with large files, manually configure in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "figma-smart-image": {
+      "url": "https://figma-smart-image-mcp-production.up.railway.app/mcp",
+      "timeout": 180000
+    }
+  }
+}
+```
+
+**Config file location**:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+**Why set timeout?**
+- Claude Desktop's **default timeout is ~30 seconds** for HTTP transport
+- Large Figma files can take 30-90 seconds to export and process
+- Setting `timeout: 180000` (3 minutes) prevents timeout errors
+- Without this, you may see "The operation timed out" errors
 
 ### Users Authenticate Themselves via OAuth
 
@@ -115,6 +142,15 @@ The project includes:
 | `FIGMA_CLIENT_ID` | Figma OAuth Client ID | `v6XQDfqJ17Q7yQMewrboBE` |
 | `FIGMA_CLIENT_SECRET` | Figma OAuth Client Secret | `your-secret-here` |
 | `REDIS_URL` | Redis connection URL | Auto-provided by Railway |
+
+**Optional Environment Variables** (Timeout Configuration):
+
+| Variable | Description | Default | Recommended |
+|----------|-------------|---------|-------------|
+| `MCP_TOOL_TIMEOUT_MS` | Maximum time for tool execution (ms) | `60000` (60s) | `180000` (3min) |
+| `FIGMA_REQUEST_TIMEOUT_MS` | Timeout for Figma API requests and downloads (ms) | Same as tool timeout | `180000` (3min) |
+
+**Why increase timeouts?** Large Figma files or slow networks may need more time. Setting these to 3 minutes prevents timeout errors for most use cases.
 
 **Setting up Figma OAuth App**:
 1. Go to [Figma Developer Portal](https://www.figma.com/developers/apps)
@@ -547,6 +583,47 @@ When running with `--transport http`, the server provides:
 | `/auth` | GET/POST | Legacy token endpoint (deprecated) |
 
 ## Troubleshooting
+
+### "The operation timed out" error
+
+**Symptoms**: Tool fails with timeout error, especially with large Figma files.
+
+**Root Cause**: The default timeouts are too short for large files.
+
+**Timeout Layers Explained**:
+- **Claude Desktop default**: ~30 seconds (HTTP transport)
+- **Server default (this MCP)**: 180 seconds (3 minutes) - already configured
+- **Network/proxy timeouts**: Varies by infrastructure
+
+**Solutions**:
+
+1. **Client-Side (RECOMMENDED - fixes most issues)**:
+
+   Add `timeout` to your `claude_desktop_config.json`:
+   ```json
+   {
+     "mcpServers": {
+       "figma-smart-image": {
+         "url": "https://your-server.railway.app/mcp",
+         "timeout": 180000
+       }
+     }
+   }
+   ```
+
+   **Why?** Claude Desktop's default 30s timeout is too short. Large Figma files need 60-120s.
+
+2. **Server-Side (already set, but can override)**:
+
+   If self-hosting, set these in Railway/environment:
+   - `MCP_TOOL_TIMEOUT_MS=180000`
+   - `FIGMA_REQUEST_TIMEOUT_MS=180000`
+
+   The public deployment already has these set to 3 minutes.
+
+3. **For Very Large Files (1000+ frames)**:
+
+   Use `list_figma_frames` first to get specific frame node IDs, then query individual frames instead of the entire file. This avoids fetching the whole document.
 
 ### Server not responding
 

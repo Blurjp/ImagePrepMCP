@@ -2,6 +2,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Set default timeouts (can be overridden by Railway env vars)
+ENV MCP_TOOL_TIMEOUT_MS=180000
+ENV FIGMA_REQUEST_TIMEOUT_MS=180000
+
 # Copy package files
 COPY figma-smart-image-mcp/package.json figma-smart-image-mcp/package-lock.json* figma-smart-image-mcp/tsconfig.json ./
 

@@ -367,7 +367,8 @@ class FigmaSmartImageServer {
             description:
               "Process a Figma design link and generate Claude-readable images. " +
               "Automatically exports the design, creates an overview image, and splits " +
-              "it into tiles if needed. All images are compressed to meet size constraints.",
+              "it into tiles if needed. All images are compressed to meet size constraints. " +
+              "Large designs may take 30-90 seconds to export and process.",
             inputSchema: {
               type: "object",
               properties: {
@@ -429,8 +430,9 @@ class FigmaSmartImageServer {
           {
             name: "list_figma_frames",
             description:
-              "List top-level frames/components in a Figma file using a shallow fetch. " +
-              "Use this to find a specific node-id before calling other tools.",
+              "List top-level frames/components in a Figma file using a shallow fetch (depth=2). " +
+              "Use this to find a specific node-id before calling other tools. " +
+              "For very large files (1000+ frames), this may take 30-60 seconds.",
             inputSchema: {
               type: "object",
               properties: {
