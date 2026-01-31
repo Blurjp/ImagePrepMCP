@@ -4,6 +4,24 @@ A comprehensive Model Context Protocol (MCP) server for Figma integration. Combi
 
 ## Quick Start
 
+### Option A: Use Hosted Service (Easiest)
+
+**One-click setup** (automatically configures timeout):
+
+**macOS/Linux**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blurjp/ImagePrepMCP/main/figma-smart-image-mcp/configure-claude.sh | bash
+```
+
+**Windows (PowerShell)**:
+```powershell
+iwr -useb https://raw.githubusercontent.com/Blurjp/ImagePrepMCP/main/figma-smart-image-mcp/configure-claude.ps1 | iex
+```
+
+Then visit https://figma-smart-image-mcp-production.up.railway.app/ to authenticate with Figma.
+
+### Option B: Run Locally
+
 ```bash
 # 1. Install dependencies
 npm install
@@ -22,6 +40,8 @@ open http://localhost:3845/
 ```
 
 Click "Connect to Figma" to authorize via OAuth. No manual token needed!
+
+**⚠️ Important**: Local setup doesn't auto-configure timeout. You must manually add `"timeout": 180000` to `claude_desktop_config.json` (see Troubleshooting section).
 
 ## Features
 
@@ -80,12 +100,34 @@ The service is deployed at: **https://figma-smart-image-mcp-production.up.railwa
 
 ### Add to Claude (for users)
 
-**Quick Add (Command Line)**:
+**⚡ One-Click Setup (Recommended)**:
+
+Automatically configure Claude Desktop with proper timeout settings:
+
+**macOS/Linux**:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Blurjp/ImagePrepMCP/main/figma-smart-image-mcp/configure-claude.sh | bash
+```
+
+**Windows (PowerShell)**:
+```powershell
+iwr -useb https://raw.githubusercontent.com/Blurjp/ImagePrepMCP/main/figma-smart-image-mcp/configure-claude.ps1 | iex
+```
+
+This automatically adds the MCP server with `timeout: 180000` (3 minutes).
+
+---
+
+**Quick Add (Command Line - NOT Recommended)**:
 ```bash
 claude mcp add --transport http figma-smart-image https://figma-smart-image-mcp-production.up.railway.app/mcp
 ```
 
-**Recommended: Manual Configuration with Timeout**
+⚠️ **Warning**: This uses the default 30-second timeout and will fail on large files. Use the one-click setup above instead.
+
+---
+
+**Manual Configuration with Timeout**
 
 For better reliability with large files, manually configure in `claude_desktop_config.json`:
 
