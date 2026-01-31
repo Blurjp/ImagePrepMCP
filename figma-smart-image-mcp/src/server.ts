@@ -594,13 +594,19 @@ class FigmaSmartImageServer {
       }
 
       // Export and download the source image
+      // For PNG exports, use a smaller scale to reduce download time for large files
+      // SVG exports ignore scale (vector-based)
+      const exportScale = force_source_format === "png" ? 0.5 : 1.0;
+
       let exportedImage;
       try {
         exportedImage = await exporter.exportAndDownload(
           parsed.fileKey,
           nodeId,
           outputDir,
-          force_source_format
+          force_source_format,
+          "source",
+          exportScale
         );
       } catch (error) {
         return {

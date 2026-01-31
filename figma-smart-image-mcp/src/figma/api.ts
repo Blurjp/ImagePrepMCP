@@ -252,9 +252,10 @@ export class FigmaApiClient {
   async getImageExportUrl(
     fileKey: string,
     nodeId: string,
-    format: "svg" | "png"
+    format: "svg" | "png",
+    scale: number = 1.0
   ): Promise<string> {
-    const url = `${this.baseUrl}/images/${fileKey}?ids=${nodeId}&format=${format}&svg_outline_text=false`;
+    const url = `${this.baseUrl}/images/${fileKey}?ids=${nodeId}&format=${format}&scale=${scale}&svg_outline_text=false`;
 
     try {
       const response = await this.requestWithTimeout(url, {
