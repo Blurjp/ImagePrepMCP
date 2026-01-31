@@ -229,6 +229,12 @@ class FigmaSmartImageServer {
     this.oauthAuthCodes = new Map();
     this.toolTimeoutMs = parseInt(process.env.MCP_TOOL_TIMEOUT_MS || process.env.FIGMA_TOOL_TIMEOUT_MS || "60000", 10);
     this.figmaRequestTimeoutMs = parseInt(process.env.FIGMA_REQUEST_TIMEOUT_MS || String(this.toolTimeoutMs), 10);
+
+    // Log timeout configuration on startup
+    console.error(`[Server] Timeout configuration:`);
+    console.error(`  MCP_TOOL_TIMEOUT_MS: ${this.toolTimeoutMs}ms`);
+    console.error(`  FIGMA_REQUEST_TIMEOUT_MS: ${this.figmaRequestTimeoutMs}ms`);
+
     // Rate limiting: 100 requests per minute per IP
     this.rateLimiter = new RateLimiter(100, 60000);
 
@@ -1797,6 +1803,10 @@ You can manually extract design tokens by:
           redis: redis ? "connected" : "disconnected (using in-memory fallback)",
           activeDevices: deviceCodeKeys.length,
           activeTransports: this.sessionTransports.size,
+          timeouts: {
+            toolTimeoutMs: this.toolTimeoutMs,
+            figmaRequestTimeoutMs: this.figmaRequestTimeoutMs,
+          },
         }));
         return;
       }
