@@ -143,8 +143,8 @@ export class FigmaApiClient {
     /**
      * Get image export URL(s) for a specific node.
      */
-    async getImageExportUrl(fileKey, nodeId, format) {
-        const url = `${this.baseUrl}/images/${fileKey}?ids=${nodeId}&format=${format}&svg_outline_text=false`;
+    async getImageExportUrl(fileKey, nodeId, format, scale = 1.0) {
+        const url = `${this.baseUrl}/images/${fileKey}?ids=${nodeId}&format=${format}&scale=${scale}&svg_outline_text=false`;
         try {
             const response = await this.requestWithTimeout(url, {
                 headers: {

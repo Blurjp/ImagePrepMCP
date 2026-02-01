@@ -47,12 +47,25 @@ const inMemorySessionTokens = new Map();
 /**
  * Device code storage operations
  */
+/**
+ * Wrap Redis operation with timeout to fail fast
+ */
+async function withRedisTimeout(promise, timeoutMs = 5000) {
+    const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+            console.error(`[Redis] Operation timed out after ${timeoutMs}ms`);
+            resolve(null);
+        }, timeoutMs);
+    });
+    const result = await Promise.race([promise, timeoutPromise]);
+    return result;
+}
 export const deviceCodesStorage = {
     async get(key) {
         const redis = getRedisClient();
         if (redis) {
-            const data = await redis.get(`device:${key}`);
-            return data ? JSON.parse(data) : null;
+            const data = await withRedisTimeout(redis.get(`device:${key}`), 3000);
+            return (data && typeof data === 'string') ? JSON.parse(data) : null;
         }
         return inMemoryDeviceCodes.get(key);
     },
@@ -121,8 +134,8 @@ export const sessionTokensStorage = {
     async get(key) {
         const redis = getRedisClient();
         if (redis) {
-            const data = await redis.get(`session:${key}`);
-            return data ? JSON.parse(data) : null;
+            const data = await withRedisTimeout(redis.get(`session:${key}`), 3000);
+            return (data && typeof data === 'string') ? JSON.parse(data) : null;
         }
         return inMemorySessionTokens.get(key);
     },
@@ -162,11 +175,15 @@ export const sessionTokensStorage = {
     async entries() {
         const redis = getRedisClient();
         if (redis) {
-            const keys = await redis.keys("session:*");
+            const keys = await withRedisTimeout(redis.keys("session:*"), 3000);
+            if (!keys || !Array.isArray(keys)) {
+                console.error("[Redis] Failed to get keys (timeout)");
+                return [];
+            }
             const entries = [];
             for (const key of keys) {
-                const data = await redis.get(key);
-                if (data) {
+                const data = await withRedisTimeout(redis.get(key), 2000);
+                if (data && typeof data === 'string') {
                     // Remove 'session:' prefix
                     const cleanKey = key.substring(8);
                     entries.push([cleanKey, JSON.parse(data)]);

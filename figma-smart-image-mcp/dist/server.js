@@ -16,6 +16,7 @@ import { z } from "zod";
 import { createServer as createHttpServer } from "http";
 import { URL } from "url";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFile } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
 import { FigmaLinkParser } from "./figma/parse_link.js";
@@ -187,6 +188,10 @@ class FigmaSmartImageServer {
         this.oauthAuthCodes = new Map();
         this.toolTimeoutMs = parseInt(process.env.MCP_TOOL_TIMEOUT_MS || process.env.FIGMA_TOOL_TIMEOUT_MS || "60000", 10);
         this.figmaRequestTimeoutMs = parseInt(process.env.FIGMA_REQUEST_TIMEOUT_MS || String(this.toolTimeoutMs), 10);
+        // Log timeout configuration on startup
+        console.error(`[Server] Timeout configuration:`);
+        console.error(`  MCP_TOOL_TIMEOUT_MS: ${this.toolTimeoutMs}ms`);
+        console.error(`  FIGMA_REQUEST_TIMEOUT_MS: ${this.figmaRequestTimeoutMs}ms`);
         // Rate limiting: 100 requests per minute per IP
         this.rateLimiter = new RateLimiter(100, 60000);
         // Initialize Redis connection
@@ -214,24 +219,32 @@ class FigmaSmartImageServer {
      * Returns session token if available, otherwise falls back to most recent OAuth token, then global token
      */
     async getTokenForSession(sessionId) {
+        console.error(`[Auth] Getting token for session: ${sessionId || "(empty)"}`);
         // Check session tokens in Redis for this specific session
         const sessionData = await sessionTokensStorage.get(sessionId);
         if (sessionData?.token) {
+            console.error(`[Auth] ✓ Found session token for session: ${sessionId}`);
             return sessionData.token;
         }
         // Check device codes in Redis (for OAuth flow)
         const deviceData = await deviceCodesStorage.get(sessionId);
         if (deviceData?.figmaToken) {
+            console.error(`[Auth] ✓ Found device code token for session: ${sessionId}`);
             return deviceData.figmaToken;
         }
         // Fall back to most recent OAuth token from any session
         const mostRecent = await sessionTokensStorage.getMostRecent();
         if (mostRecent?.value?.token) {
-            console.error(`[Auth] Using most recent OAuth token for session ${sessionId}`);
+            console.error(`[Auth] ✓ Using most recent OAuth token for session ${sessionId} (from: ${mostRecent.key})`);
             return mostRecent.value.token;
         }
         // Fall back to global token (for local dev)
-        return this.figmaToken;
+        if (this.figmaToken) {
+            console.error(`[Auth] ✓ Using global token (env/file)`);
+            return this.figmaToken;
+        }
+        console.error(`[Auth] ✗ NO TOKEN FOUND for session: ${sessionId}`);
+        return "";
     }
     /**
      * Clean up expired sessions (older than 1 hour)
@@ -306,7 +319,8 @@ class FigmaSmartImageServer {
                         name: "process_figma_link",
                         description: "Process a Figma design link and generate Claude-readable images. " +
                             "Automatically exports the design, creates an overview image, and splits " +
-                            "it into tiles if needed. All images are compressed to meet size constraints.",
+                            "it into tiles if needed. All images are compressed to meet size constraints. " +
+                            "Large designs may take 30-90 seconds to export and process.",
                         inputSchema: {
                             type: "object",
                             properties: {
@@ -364,8 +378,9 @@ class FigmaSmartImageServer {
                     },
                     {
                         name: "list_figma_frames",
-                        description: "List top-level frames/components in a Figma file using a shallow fetch. " +
-                            "Use this to find a specific node-id before calling other tools.",
+                        description: "List top-level frames/components in a Figma file using a shallow fetch (depth=2). " +
+                            "Use this to find a specific node-id before calling other tools. " +
+                            "For very large files (1000+ frames), this may take 30-60 seconds.",
                         inputSchema: {
                             type: "object",
                             properties: {
@@ -485,9 +500,12 @@ class FigmaSmartImageServer {
                 }
             }
             // Export and download the source image
+            // For PNG exports, use a smaller scale to reduce download time for large files
+            // SVG exports ignore scale (vector-based)
+            const exportScale = force_source_format === "png" ? 0.5 : 1.0;
             let exportedImage;
             try {
-                exportedImage = await exporter.exportAndDownload(parsed.fileKey, nodeId, outputDir, force_source_format);
+                exportedImage = await exporter.exportAndDownload(parsed.fileKey, nodeId, outputDir, force_source_format, "source", exportScale);
             }
             catch (error) {
                 return {
@@ -649,13 +667,44 @@ class FigmaSmartImageServer {
                 }
             }
             responseText += `\nManifest: ${getDisplayPath(manifestPath)}\n`;
+            // For HTTP transport, include images as base64 resources so they're accessible
+            const content = [
+                {
+                    type: "text",
+                    text: responseText,
+                },
+            ];
+            // Add overview image
+            try {
+                const overviewData = await readFile(overview.path);
+                const overviewBase64 = overviewData.toString('base64');
+                content.push({
+                    type: "image",
+                    data: overviewBase64,
+                    mimeType: `image/${overview.format}`,
+                });
+            }
+            catch (error) {
+                console.error(`Failed to read overview image: ${error}`);
+            }
+            // Add first few tiles
+            const maxTilesToInclude = Math.min(6, tiles.length);
+            for (let i = 0; i < maxTilesToInclude; i++) {
+                try {
+                    const tileData = await readFile(tiles[i].path);
+                    const tileBase64 = tileData.toString('base64');
+                    content.push({
+                        type: "image",
+                        data: tileBase64,
+                        mimeType: `image/${overview.format}`,
+                    });
+                }
+                catch (error) {
+                    console.error(`Failed to read tile ${i}: ${error}`);
+                }
+            }
             return {
-                content: [
-                    {
-                        type: "text",
-                        text: responseText,
-                    },
-                ],
+                content,
             };
         }
         catch (error) {
@@ -1590,6 +1639,10 @@ You can manually extract design tokens by:
                     redis: redis ? "connected" : "disconnected (using in-memory fallback)",
                     activeDevices: deviceCodeKeys.length,
                     activeTransports: this.sessionTransports.size,
+                    timeouts: {
+                        toolTimeoutMs: this.toolTimeoutMs,
+                        figmaRequestTimeoutMs: this.figmaRequestTimeoutMs,
+                    },
                 }));
                 return;
             }

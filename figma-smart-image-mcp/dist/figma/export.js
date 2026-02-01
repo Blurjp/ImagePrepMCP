@@ -58,20 +58,23 @@ export class FigmaExporter {
      * Export a node from Figma and download it.
      * Tries SVG first, falls back to PNG.
      */
-    async exportAndDownload(fileKey, nodeId, outputDir, forceFormat = "auto", baseName = "source") {
+    async exportAndDownload(fileKey, nodeId, outputDir, forceFormat = "auto", baseName = "source", scale = 1.0) {
         let format = "svg"; // Default to SVG for better quality
         let imageUrl;
+        // For PNG format, use scale parameter to reduce download size
+        // For SVG, scale is ignored (SVG is vector-based)
+        const exportScale = (forceFormat === "png" || forceFormat === "auto") ? scale : 1.0;
         if (forceFormat === "auto") {
             // Try SVG first (better quality for UI designs), fall back to PNG
             try {
-                imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "svg");
+                imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "svg", 1.0);
                 format = "svg";
             }
             catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 if (message.includes("not supported")) {
-                    // SVG not supported, try PNG
-                    imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "png");
+                    // SVG not supported, try PNG with scale
+                    imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "png", exportScale);
                     format = "png";
                 }
                 else {
@@ -80,11 +83,11 @@ export class FigmaExporter {
             }
         }
         else if (forceFormat === "svg") {
-            imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "svg");
+            imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "svg", 1.0);
             format = "svg";
         }
         else {
-            imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "png");
+            imageUrl = await this.api.getImageExportUrl(fileKey, nodeId, "png", exportScale);
             format = "png";
         }
         const extension = format === "svg" ? "svg" : "png";

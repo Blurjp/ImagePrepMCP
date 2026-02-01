@@ -121,7 +121,7 @@ export declare class FigmaApiClient {
     /**
      * Get image export URL(s) for a specific node.
      */
-    getImageExportUrl(fileKey: string, nodeId: string, format: "svg" | "png"): Promise<string>;
+    getImageExportUrl(fileKey: string, nodeId: string, format: "svg" | "png", scale?: number): Promise<string>;
     /**
      * Find the first suitable frame/node in the file.
      * Strategy: Get the first page, then find the first top-level frame.

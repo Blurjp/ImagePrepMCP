@@ -20,6 +20,6 @@ export declare class FigmaExporter {
      * Export a node from Figma and download it.
      * Tries SVG first, falls back to PNG.
      */
-    exportAndDownload(fileKey: string, nodeId: string, outputDir: string, forceFormat?: "auto" | "svg" | "png", baseName?: string): Promise<ExportedImage>;
+    exportAndDownload(fileKey: string, nodeId: string, outputDir: string, forceFormat?: "auto" | "svg" | "png", baseName?: string, scale?: number): Promise<ExportedImage>;
 }
 //# sourceMappingURL=export.d.ts.map

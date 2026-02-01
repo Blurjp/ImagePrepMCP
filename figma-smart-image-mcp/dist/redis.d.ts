@@ -3,9 +3,6 @@
  * Falls back to in-memory Map if Redis is not available (for local dev)
  */
 export declare function getRedisClient(): any;
-/**
- * Device code storage operations
- */
 export declare const deviceCodesStorage: {
     get(key: string): Promise<any>;
     set(key: string, value: any): Promise<void>;
