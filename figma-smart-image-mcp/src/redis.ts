@@ -56,11 +56,25 @@ const inMemorySessionTokens: Map<string, any> = new Map();
 /**
  * Device code storage operations
  */
+/**
+ * Wrap Redis operation with timeout to fail fast
+ */
+async function withRedisTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T | null> {
+  const timeoutPromise = new Promise<null>((resolve) => {
+    setTimeout(() => {
+      console.error(`[Redis] Operation timed out after ${timeoutMs}ms`);
+      resolve(null);
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]) as Promise<T | null>;
+}
+
 export const deviceCodesStorage = {
   async get(key: string): Promise<any> {
     const redis = getRedisClient();
     if (redis) {
-      const data = await redis.get(`device:${key}`);
+      const data = await withRedisTimeout(redis.get(`device:${key}`), 3000);
       return data ? JSON.parse(data) : null;
     }
     return inMemoryDeviceCodes.get(key);
@@ -133,7 +147,7 @@ export const sessionTokensStorage = {
   async get(key: string): Promise<any> {
     const redis = getRedisClient();
     if (redis) {
-      const data = await redis.get(`session:${key}`);
+      const data = await withRedisTimeout(redis.get(`session:${key}`), 3000);
       return data ? JSON.parse(data) : null;
     }
     return inMemorySessionTokens.get(key);
@@ -177,10 +191,14 @@ export const sessionTokensStorage = {
   async entries(): Promise<Array<[string, any]>> {
     const redis = getRedisClient();
     if (redis) {
-      const keys = await redis.keys("session:*");
+      const keys = await withRedisTimeout(redis.keys("session:*"), 3000);
+      if (!keys) {
+        console.error("[Redis] Failed to get keys (timeout)");
+        return [];
+      }
       const entries: Array<[string, any]> = [];
       for (const key of keys) {
-        const data = await redis.get(key);
+        const data = await withRedisTimeout(redis.get(key), 2000);
         if (data) {
           // Remove 'session:' prefix
           const cleanKey = key.substring(8);
