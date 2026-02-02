@@ -48,9 +48,11 @@ Click "Connect to Figma" to authorize via OAuth. No manual token needed!
 ### Visual Analysis (Image Export)
 - **Automatic Figma Export**: Paste any Figma design link and automatically export the design
 - **Smart Format Selection**: Tries SVG first (best for UI), falls back to PNG
+- **Large File Optimization**: PNG exports automatically use 50% scale at source, reducing download time by ~75% for large files
 - **Size Optimization**: All images are compressed to fit size constraints (default 4MB)
 - **Automatic Tiling**: Large designs are split into overlapping tiles for detailed analysis
 - **Fallback Node Selection**: If no node-id is provided, selects the first frame automatically
+- **Base64 Embedding**: Images embedded directly in MCP responses for compatibility with remote deployments
 
 ### Structural Data Extraction (NEW!)
 - **Component Extraction**: Get all components and component sets (variants) from Figma files
@@ -62,6 +64,7 @@ Click "Connect to Figma" to authorize via OAuth. No manual token needed!
 - **OAuth 2.0 Authentication**: Secure PKCE flow for Figma authorization
 - **Multi-Tenant Support**: Each user has their own OAuth token, safe for public hosting
 - **Redis Storage**: Reliable token storage with automatic expiration (1 hour)
+- **Fast Auth Errors**: Unauthenticated requests fail within 3 seconds (not 180s) with clear error messages
 - **Token Refresh**: Automatic token refresh for long-running sessions
 - **Rate Limiting**: Built-in protection against API abuse (100 req/min per IP)
 - **Session Cleanup**: Expired sessions are automatically cleaned up
@@ -358,9 +361,10 @@ Exports Figma designs as images for Claude's vision capabilities.
 - Large designs that benefit from tiled viewing
 
 **Returns:**
-- Overview image (optimized WebP/JPEG)
-- Tiles for detailed analysis (overlapping 1536px squares)
-- Manifest with metadata
+- Overview image (optimized WebP/JPEG) embedded as base64 in MCP response
+- Up to 6 tiles for detailed analysis (overlapping 1536px squares) embedded as base64
+- Manifest with metadata and file paths
+- **Note**: Images are embedded directly in the response for seamless use with both local and remote deployments
 
 **Example:**
 ```
@@ -841,6 +845,13 @@ Built with:
 ---
 
 ## What's New
+
+### v2.1.0 (2026-01-24) - Performance & UX Improvements
+- ⚡ **Large File Optimization**: PNG exports now use 50% scale at source, reducing download time by ~75%
+- 🚀 **Fast Auth Errors**: Unauthenticated requests fail within 3 seconds (instead of 180s) with clear error messages
+- 📦 **Base64 Image Embedding**: Images embedded directly in MCP responses for seamless remote deployment
+- 🔧 **Redis Timeout Wrapper**: All Redis operations have 3-second timeouts to prevent hangs
+- 📝 **One-Click Setup Scripts**: Automated configuration for macOS/Linux/Windows with correct timeouts
 
 ### v2.0.0 (2026-01-23) - Component Extraction & Design Variables
 - ✨ Added `get_figma_components` tool - Extract all components and component sets
