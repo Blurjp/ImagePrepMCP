@@ -27,6 +27,7 @@ import { ImageTiler } from "./image/tiles.js";
 import { ImageCropper } from "./image/crops.js";
 import { generateOutputDir, writeManifest, getDisplayPath, formatBytes, } from "./util/fs.js";
 import { deviceCodesStorage, sessionTokensStorage, getRedisClient } from "./redis.js";
+import { ReactComponentGenerator } from "./codegen/index.js";
 // Tool input schemas
 const ProcessFigmaLinkInputSchema = z.object({
     url: z.string().url("Must be a valid URL"),
@@ -54,6 +55,14 @@ const ListFigmaFramesInputSchema = z.object({
 });
 const DebugFigmaAccessInputSchema = z.object({
     url: z.string().url("Must be a valid Figma URL"),
+});
+const ExportFigmaToReactInputSchema = z.object({
+    url: z.string().url("Must be a valid Figma URL with node-id"),
+    component_name: z.string().optional(),
+    include_typescript: z.boolean().optional(),
+    export_style: z.enum(["twin.macro", "tw", "classnames"]).optional(),
+    extract_design_tokens: z.boolean().optional(),
+    extract_props: z.boolean().optional(),
 });
 // Default constants
 const DEFAULT_MAX_BYTES = 4_000_000; // 4MB
@@ -402,6 +411,25 @@ class FigmaSmartImageServer {
                             required: ["url"],
                         },
                     },
+                    {
+                        name: "export_figma_to_react",
+                        description: "Export a Figma design as a React component with Tailwind CSS classes. " +
+                            "Converts Auto Layout to Flexbox, Figma styles to Tailwind utilities, and " +
+                            "extracts design tokens. Returns production-ready React/TypeScript code. " +
+                            "Large designs may take 30-60 seconds to process.",
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                url: { type: "string", description: "The Figma URL with node-id parameter" },
+                                component_name: { type: "string", description: "Output component name (default: from Figma)" },
+                                include_typescript: { type: "boolean", description: "Generate TypeScript with props interface (default: true)" },
+                                export_style: { type: "string", enum: ["twin.macro", "tw", "classnames"], description: "CSS-in-JS style (default: twin.macro)" },
+                                extract_design_tokens: { type: "boolean", description: "Export variables as CSS/Tailwind config (default: false)" },
+                                extract_props: { type: "boolean", description: "Extract dynamic content as props (default: true)" },
+                            },
+                            required: ["url"],
+                        },
+                    },
                 ],
             };
         });
@@ -425,6 +453,9 @@ class FigmaSmartImageServer {
                 }
                 if (toolName === "debug_figma_access") {
                     return await this.handleDebugFigmaAccess(request.params.arguments);
+                }
+                if (toolName === "export_figma_to_react") {
+                    return await this.handleExportFigmaToReact(request.params.arguments);
                 }
                 throw new Error(`Unknown tool: ${toolName}`);
             };
@@ -1110,6 +1141,128 @@ You can manually extract design tokens by:
                     {
                         type: "text",
                         text: `Error: ${errorMessage}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+    async handleExportFigmaToReact(args) {
+        try {
+            // Extract session ID from metadata if available
+            const sessionId = args._meta?.sessionId;
+            const token = await this.getTokenForSession(sessionId || "");
+            if (!token) {
+                return this.authErrorResponse();
+            }
+            // Validate input
+            const validated = ExportFigmaToReactInputSchema.parse(args);
+            const { url, component_name, include_typescript = true, export_style = "twin.macro", extract_design_tokens = false, extract_props = true, } = validated;
+            // Parse Figma URL
+            let parsed;
+            try {
+                parsed = FigmaLinkParser.parse(url);
+            }
+            catch (error) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: `Failed to parse Figma URL: ${error}`,
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+            if (!parsed.nodeId) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "URL must include a node-id parameter. Use the Figma URL with a specific node selected.",
+                        },
+                    ],
+                    isError: true,
+                };
+            }
+            // Create the generator and generate component
+            const api = new FigmaApiClient(token, this.figmaRequestTimeoutMs);
+            const generator = new ReactComponentGenerator(api, FigmaLinkParser);
+            const result = await generator.generate({
+                url,
+                componentName: component_name,
+                includeTypescript: include_typescript,
+                exportStyle: export_style,
+                extractDesignTokens: extract_design_tokens,
+                extractProps: extract_props,
+            });
+            // Format output
+            let outputText = `# React Component Generated\n\n`;
+            outputText += `Component: ${result.component.name}\n`;
+            outputText += `Language: ${result.component.language}\n\n`;
+            if (result.dependencies && result.dependencies.length > 0) {
+                outputText += `## Required Dependencies\n\n`;
+                outputText += "```bash\n";
+                outputText += `npm install ${result.dependencies.join(" ")}\n`;
+                outputText += "```\n\n";
+            }
+            outputText += `## Component Code\n\n`;
+            outputText += "```" + (result.component.language === "typescript" ? "tsx" : "jsx") + "\n";
+            outputText += result.component.code;
+            outputText += "\n```\n\n";
+            if (result.designTokens?.cssVariables) {
+                outputText += `## Design Tokens (CSS Variables)\n\n`;
+                outputText += "```css\n";
+                outputText += result.designTokens.cssVariables;
+                outputText += "\n```\n\n";
+            }
+            if (result.designTokens?.tailwindConfig) {
+                outputText += `## Tailwind Config Extension\n\n`;
+                outputText += "```javascript\n";
+                outputText += "// Add this to your tailwind.config.js:\n";
+                outputText += "module.exports = {\n";
+                outputText += "  theme: {\n";
+                outputText += "    extend: ";
+                outputText += JSON.stringify(result.designTokens.tailwindConfig.theme.extend, null, 2);
+                outputText += "\n  }\n";
+                outputText += "}\n";
+                outputText += "```\n\n";
+            }
+            outputText += `## Metadata\n\n`;
+            outputText += `- Figma File Key: ${result.metadata.figmaFileKey}\n`;
+            outputText += `- Figma Node ID: ${result.metadata.figmaNodeId}\n`;
+            outputText += `- Figma Node Name: ${result.metadata.figmaNodeName}\n`;
+            if (result.metadata.bounds) {
+                outputText += `- Bounds: ${result.metadata.bounds.width}x${result.metadata.bounds.height}px\n`;
+            }
+            if (result.component.props && result.component.props.length > 0) {
+                outputText += `\n## Props\n\n`;
+                outputText += `| Prop | Type | Default | Required |\n`;
+                outputText += `|------|------|---------|----------|\n`;
+                for (const prop of result.component.props) {
+                    const defaultVal = prop.defaultValue !== undefined ? `"${prop.defaultValue}"` : "-";
+                    const required = prop.isRequired ? "Yes" : "No";
+                    outputText += `| ${prop.name} | \`${prop.type}\` | ${defaultVal} | ${required} |\n`;
+                }
+            }
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: outputText,
+                    },
+                ],
+            };
+        }
+        catch (error) {
+            if (this.isAuthError(error)) {
+                return this.authErrorResponse("Your Figma authorization is missing or expired.");
+            }
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
                     },
                 ],
                 isError: true,

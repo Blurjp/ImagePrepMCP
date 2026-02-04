@@ -23,7 +23,6 @@ export class FigmaApiClient {
     }
     buildAuthHeaders() {
         return {
-            Authorization: `Bearer ${this.accessToken}`,
             "X-Figma-Token": this.accessToken,
         };
     }

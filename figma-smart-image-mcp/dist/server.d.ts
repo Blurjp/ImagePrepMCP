@@ -39,6 +39,7 @@ declare class FigmaSmartImageServer {
     private handleGetFigmaVariables;
     private handleListFigmaFrames;
     private handleDebugFigmaAccess;
+    private handleExportFigmaToReact;
     runStdio(): Promise<void>;
     runHttp(port: number): Promise<void>;
     private generateCodeVerifier;
