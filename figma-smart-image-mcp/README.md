@@ -2,6 +2,8 @@
 
 A comprehensive Model Context Protocol (MCP) server for Figma integration. Combines visual analysis (image export) with structural data extraction (components, layout properties, design variables). Provides everything the official Figma MCP offers **plus** smart image processing for Claude's vision capabilities.
 
+[Watch Demo](https://youtu.be/sMM-UT0h9cg)
+
 ## Quick Start
 
 ### Option A: Use Hosted Service (Easiest)
