@@ -62,6 +62,14 @@ Click "Connect to Figma" to authorize via OAuth. No manual token needed!
 - **Design Variables**: Access design tokens (colors, spacing, typography) with multi-mode support
 - **Detailed Node Info**: Get fills, effects, opacity, text content, and hierarchy for any node
 
+### React + Tailwind Code Generation (NEW!)
+- **Export to React Components**: Convert Figma designs to production-ready React code
+- **Tailwind CSS Classes**: Auto Layout → Flexbox, Figma styles → Tailwind utilities
+- **TypeScript Support**: Generate typed components with props interfaces
+- **Design Tokens**: Extract Figma variables as CSS custom properties and Tailwind config
+- **Variant Support**: Component sets generate variant props with style mappings
+- **twin.macro Compatible**: CSS-in-JS output with `tw` prop for styled-components style
+
 ### Infrastructure
 - **OAuth 2.0 Authentication**: Secure PKCE flow for Figma authorization
 - **Multi-Tenant Support**: Each user has their own OAuth token, safe for public hosting
@@ -84,6 +92,7 @@ This server is a **superset** of the official Figma MCP - it does everything the
 | **Image export** | ✅ **YES!** | ❌ **NO** |
 | **Tiled images for vision** | ✅ **YES!** | ❌ **NO** |
 | **Visual analysis** | ✅ **YES!** | ❌ **NO** |
+| **React + Tailwind export** | ✅ **YES!** | ❌ **NO** |
 
 **Best of both worlds:**
 - 🎨 Visual understanding via images (for Claude's vision)
@@ -94,6 +103,7 @@ This server is a **superset** of the official Figma MCP - it does everything the
 - "Show me what this design looks like" → Only this server can do it
 - "Build this design exactly" → This server gives Claude both visual context AND exact values
 - "Analyze the visual hierarchy" → This server provides images for vision analysis
+- "Export this as React + Tailwind code" → Only this server generates production-ready components
 
 ## Deployment to Railway (Public Service)
 
@@ -351,7 +361,7 @@ launchctl unload ~/Library/LaunchAgents/com.figma.smartimage.mcp.plist
 
 ### Available Tools
 
-This server provides 4 MCP tools for comprehensive Figma integration:
+This server provides 6 MCP tools for comprehensive Figma integration:
 
 #### 1. `process_figma_link` - Visual Analysis
 Exports Figma designs as images for Claude's vision capabilities.
@@ -445,6 +455,47 @@ Use get_figma_variables to extract design tokens from:
 https://www.figma.com/design/abc123/Design-System
 ```
 
+#### 5. `export_figma_to_react` - React + Tailwind Code Generation
+Exports Figma designs as production-ready React components with Tailwind CSS classes.
+
+**Requires:** URL with `node-id` parameter
+
+**When to use:**
+- Generating React code from Figma designs
+- Building UI components with Tailwind CSS
+- Creating responsive layouts from Auto Layout
+- Exporting design tokens as CSS/Tailwind config
+- Working with component variants
+
+**Returns:**
+- React/TypeScript component code
+- Props interface with type definitions
+- Tailwind CSS utility classes
+- Optional design tokens (CSS variables + Tailwind config)
+- Component metadata (file key, node ID, bounds)
+
+**Example:**
+```
+Use export_figma_to_react with:
+https://www.figma.com/design/abc123/My-Design?node-id=1-456
+component_name: "MyButton"
+include_typescript: true
+export_style: "twin.macro"
+```
+
+#### 6. `list_figma_frames` - Quick Frame Listing
+Lists top-level frames and components with their node IDs (shallow fetch).
+
+**When to use:**
+- Finding specific frame node IDs without fetching entire file
+- Avoiding timeouts on large files
+- Quick overview of file structure
+
+**Returns:**
+- Frame names and node IDs
+- Component names and keys
+- File metadata
+
 ### Tool Selection Guide
 
 | User asks for... | Use this tool |
@@ -453,8 +504,10 @@ https://www.figma.com/design/abc123/Design-System
 | "What components exist?" | `get_figma_components` |
 | "What's the spacing in this frame?" | `get_figma_node_details` |
 | "What are the color tokens?" | `get_figma_variables` |
-| "Build this design" | **ALL 4 TOOLS!** |
-| "Document this design system" | **ALL 4 TOOLS!** |
+| "Export this as React code" | `export_figma_to_react` |
+| "List frames in this file" | `list_figma_frames` |
+| "Build this design" | `export_figma_to_react` |
+| "Document this design system" | `get_figma_components` + `get_figma_variables` |
 
 ### Basic Usage
 
@@ -479,11 +532,14 @@ Claude will use `get_figma_components` to list all components.
 Build this Figma design as React code:
 https://www.figma.com/design/abc123/My-Design?node-id=1-456
 ```
-Claude will use all 4 tools:
-1. `process_figma_link` - Get visual context
-2. `get_figma_components` - Understand reusable components
-3. `get_figma_node_details` - Get exact spacing/colors
-4. `get_figma_variables` - Extract design tokens
+Claude will use `export_figma_to_react` to generate production-ready React + Tailwind code.
+
+**For component extraction:**
+```
+What components are in this design system?
+https://www.figma.com/design/abc123/Design-System
+```
+Claude will use `get_figma_components` to list all components.
 
 ### Tool Parameters
 
@@ -504,6 +560,15 @@ Claude will use all 4 tools:
 - `get_figma_components`: Only requires `url` (Figma file URL)
 - `get_figma_node_details`: Only requires `url` (Figma URL with `node-id` parameter)
 - `get_figma_variables`: Only requires `url` (Figma file URL)
+- `export_figma_to_react`:
+  - `url` (required): Figma URL with `node-id` parameter
+  - `component_name`: Output component name (default: from Figma)
+  - `include_typescript`: Generate TypeScript with props interface (default: true)
+  - `export_style`: CSS-in-JS style - "twin.macro", "tw", or "classnames" (default: "twin.macro")
+  - `extract_design_tokens`: Export variables as CSS/Tailwind config (default: false)
+  - `extract_props`: Extract dynamic content as props (default: true)
+- `list_figma_frames`: Only requires `url` (Figma file URL)
+- `debug_figma_access`: No parameters required
 
 ### Example Outputs
 
@@ -607,6 +672,64 @@ Values: {"Light": {"r": 0.2, "g": 0.5, "b": 1, "a": 1}}
 Medium spacing
 ID: VariableID:791
 Values: {"Default": 16}
+```
+
+#### `export_figma_to_react` Output
+```markdown
+# React Component Generated
+
+Component: MyButton
+Language: typescript
+
+## Required Dependencies
+
+```bash
+npm install twin.macro
+```
+
+## Component Code
+
+```tsx
+import { tw } from "twin.macro"
+import type { ReactNode } from "react"
+
+export interface MyButtonProps {
+  variant: "primary" | "secondary" | "outline";
+  size: "sm" | "md" | "lg";
+  children?: ReactNode;
+}
+
+export function MyButton({ variant = "primary", size = "md", children }: MyButtonProps) {
+  return (
+    <button
+      css={tw`px-4 py-2 rounded font-medium transition-colors
+        ${variant === "primary" ? "bg-blue-600 text-white hover:bg-blue-700" : ""}
+        ${variant === "secondary" ? "bg-gray-200 text-gray-900 hover:bg-gray-300" : ""}
+        ${variant === "outline" ? "border border-gray-300 text-gray-700 hover:bg-gray-50" : ""}
+        ${size === "sm" ? "text-sm px-3 py-1" : ""}
+        ${size === "lg" ? "text-lg px-6 py-3" : ""}
+      `}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+## Metadata
+
+- Figma File Key: abc123
+- Figma Node ID: 1-456
+- Figma Node Name: Button / Primary
+- Bounds: 200x48px
+
+## Props
+
+| Prop | Type | Default | Required |
+|------|------|---------|----------|
+| variant | `"primary" | "secondary" | "outline"` | "primary" | Yes |
+| size | `"sm" | "md" | "lg"` | "md" | Yes |
+| children | `React.ReactNode` | - | No |
 ```
 
 ## URL Formats Supported
@@ -803,6 +926,11 @@ figma-smart-image-mcp/
 ├── src/
 │   ├── server.ts          # MCP server entry point
 │   ├── redis.ts           # Redis storage for OAuth tokens
+│   ├── codegen/           # React + Tailwind code generation
+│   │   ├── generators/    # Component, props, variants, JSX
+│   │   ├── mappers/       # Layout, color, typography → Tailwind
+│   │   ├── traverser/     # Optimized Figma tree traversal
+│   │   └── utils/         # Types, string utils, color utils
 │   ├── figma/
 │   │   ├── parse_link.ts  # URL parsing
 │   │   ├── api.ts         # Figma API client
@@ -847,6 +975,16 @@ Built with:
 ---
 
 ## What's New
+
+### v2.2.0 (2026-02-05) - React + Tailwind Export
+- ✨ **NEW**: `export_figma_to_react` tool - Generate production-ready React components
+- 🎨 **Auto Layout → Flexbox**: Automatic conversion to Tailwind flex classes
+- 🌈 **Color Mapping**: Figma fills → Tailwind color utilities with closest match
+- 📝 **Typography Mapping**: Font sizes, weights, line-height → Tailwind classes
+- 🔧 **Design Tokens**: Export Figma variables as CSS + Tailwind config
+- 🎯 **Variant Support**: Component sets generate variant props with style analysis
+- ⚡ **Optimized Traverser**: Single API call caches entire document (fixes rate limiting)
+- 📦 **TypeScript Support**: Generate typed components with props interfaces
 
 ### v2.1.0 (2026-01-24) - Performance & UX Improvements
 - ⚡ **Large File Optimization**: PNG exports now use 50% scale at source, reducing download time by ~75%
