@@ -64,8 +64,8 @@ export const deviceCodesStorage = {
     async get(key) {
         const redis = getRedisClient();
         if (redis) {
-            const data = await withRedisTimeout(redis.get(`device:${key}`), 3000);
-            return (data && typeof data === 'string') ? JSON.parse(data) : null;
+            const raw = await withRedisTimeout(redis.get(`device:${key}`), 3000);
+            return (raw && typeof raw === 'string') ? JSON.parse(raw) : null;
         }
         return inMemoryDeviceCodes.get(key);
     },
@@ -134,8 +134,8 @@ export const sessionTokensStorage = {
     async get(key) {
         const redis = getRedisClient();
         if (redis) {
-            const data = await withRedisTimeout(redis.get(`session:${key}`), 3000);
-            return (data && typeof data === 'string') ? JSON.parse(data) : null;
+            const raw = await withRedisTimeout(redis.get(`session:${key}`), 3000);
+            return (raw && typeof raw === 'string') ? JSON.parse(raw) : null;
         }
         return inMemorySessionTokens.get(key);
     },
@@ -182,11 +182,11 @@ export const sessionTokensStorage = {
             }
             const entries = [];
             for (const key of keys) {
-                const data = await withRedisTimeout(redis.get(key), 2000);
-                if (data && typeof data === 'string') {
+                const raw = await withRedisTimeout(redis.get(key), 2000);
+                if (raw && typeof raw === 'string') {
                     // Remove 'session:' prefix
                     const cleanKey = key.substring(8);
-                    entries.push([cleanKey, JSON.parse(data)]);
+                    entries.push([cleanKey, JSON.parse(raw)]);
                 }
             }
             return entries;

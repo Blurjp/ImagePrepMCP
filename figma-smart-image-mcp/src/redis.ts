@@ -75,8 +75,8 @@ export const deviceCodesStorage = {
   async get(key: string): Promise<any> {
     const redis = getRedisClient();
     if (redis) {
-      const data = await withRedisTimeout<string>(redis.get(`device:${key}`), 3000);
-      return (data && typeof data === 'string') ? JSON.parse(data) : null;
+      const raw = await withRedisTimeout(redis.get(`device:${key}`) as Promise<string | null>, 3000);
+      return (raw && typeof raw === 'string') ? JSON.parse(raw) : null;
     }
     return inMemoryDeviceCodes.get(key);
   },
@@ -148,8 +148,8 @@ export const sessionTokensStorage = {
   async get(key: string): Promise<any> {
     const redis = getRedisClient();
     if (redis) {
-      const data = await withRedisTimeout<string>(redis.get(`session:${key}`), 3000);
-      return (data && typeof data === 'string') ? JSON.parse(data) : null;
+      const raw = await withRedisTimeout(redis.get(`session:${key}`) as Promise<string | null>, 3000);
+      return (raw && typeof raw === 'string') ? JSON.parse(raw) : null;
     }
     return inMemorySessionTokens.get(key);
   },
@@ -192,18 +192,18 @@ export const sessionTokensStorage = {
   async entries(): Promise<Array<[string, any]>> {
     const redis = getRedisClient();
     if (redis) {
-      const keys = await withRedisTimeout<string[]>(redis.keys("session:*"), 3000);
+      const keys = await withRedisTimeout(redis.keys("session:*") as Promise<string[]>, 3000);
       if (!keys || !Array.isArray(keys)) {
         console.error("[Redis] Failed to get keys (timeout)");
         return [];
       }
       const entries: Array<[string, any]> = [];
       for (const key of keys) {
-        const data = await withRedisTimeout<string>(redis.get(key), 2000);
-        if (data && typeof data === 'string') {
+        const raw = await withRedisTimeout(redis.get(key) as Promise<string | null>, 2000);
+        if (raw && typeof raw === 'string') {
           // Remove 'session:' prefix
           const cleanKey = key.substring(8);
-          entries.push([cleanKey, JSON.parse(data)]);
+          entries.push([cleanKey, JSON.parse(raw)]);
         }
       }
       return entries;
