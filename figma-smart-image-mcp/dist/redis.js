@@ -44,6 +44,21 @@ export function getRedisClient() {
  */
 const inMemoryDeviceCodes = new Map();
 const inMemorySessionTokens = new Map();
+const DEVICE_CODE_TTL_MS = 10 * 60 * 1000;
+const SESSION_TOKEN_TTL_MS = 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 1000;
+function cleanupInMemoryMaps() {
+    const now = Date.now();
+    for (const [key, entry] of inMemoryDeviceCodes.entries()) {
+        if (now > entry.expiresAt)
+            inMemoryDeviceCodes.delete(key);
+    }
+    for (const [key, entry] of inMemorySessionTokens.entries()) {
+        if (now > entry.expiresAt)
+            inMemorySessionTokens.delete(key);
+    }
+}
+setInterval(cleanupInMemoryMaps, CLEANUP_INTERVAL_MS);
 /**
  * Device code storage operations
  */
@@ -67,16 +82,22 @@ export const deviceCodesStorage = {
             const raw = await withRedisTimeout(redis.get(`device:${key}`), 3000);
             return (raw && typeof raw === 'string') ? JSON.parse(raw) : null;
         }
-        return inMemoryDeviceCodes.get(key);
+        const entry = inMemoryDeviceCodes.get(key);
+        if (!entry)
+            return null;
+        if (Date.now() > entry.expiresAt) {
+            inMemoryDeviceCodes.delete(key);
+            return null;
+        }
+        return entry.value;
     },
     async set(key, value) {
         const redis = getRedisClient();
         if (redis) {
-            // Set with 10 minute expiration (600 seconds)
             await redis.setex(`device:${key}`, 600, JSON.stringify(value));
         }
         else {
-            inMemoryDeviceCodes.set(key, value);
+            inMemoryDeviceCodes.set(key, { value, expiresAt: Date.now() + DEVICE_CODE_TTL_MS });
         }
     },
     async delete(key) {
@@ -96,23 +117,27 @@ export const deviceCodesStorage = {
             for (const key of keys) {
                 const data = await redis.get(key);
                 if (data) {
-                    // Remove 'device:' prefix
                     const cleanKey = key.substring(7);
                     entries.push([cleanKey, JSON.parse(data)]);
                 }
             }
             return entries;
         }
-        return Array.from(inMemoryDeviceCodes.entries());
+        const now = Date.now();
+        return Array.from(inMemoryDeviceCodes.entries())
+            .filter(([, entry]) => now <= entry.expiresAt)
+            .map(([k, entry]) => [k, entry.value]);
     },
     async keys() {
         const redis = getRedisClient();
         if (redis) {
             const keys = await redis.keys("device:*");
-            // Remove 'device:' prefix
             return keys.map((k) => k.substring(7));
         }
-        return Array.from(inMemoryDeviceCodes.keys());
+        const now = Date.now();
+        return Array.from(inMemoryDeviceCodes.entries())
+            .filter(([, entry]) => now <= entry.expiresAt)
+            .map(([k]) => k);
     },
     async clearAll() {
         const redis = getRedisClient();
@@ -137,16 +162,22 @@ export const sessionTokensStorage = {
             const raw = await withRedisTimeout(redis.get(`session:${key}`), 3000);
             return (raw && typeof raw === 'string') ? JSON.parse(raw) : null;
         }
-        return inMemorySessionTokens.get(key);
+        const entry = inMemorySessionTokens.get(key);
+        if (!entry)
+            return null;
+        if (Date.now() > entry.expiresAt) {
+            inMemorySessionTokens.delete(key);
+            return null;
+        }
+        return entry.value;
     },
     async set(key, value) {
         const redis = getRedisClient();
         if (redis) {
-            // Set with 1 hour expiration (3600 seconds)
             await redis.setex(`session:${key}`, 3600, JSON.stringify(value));
         }
         else {
-            inMemorySessionTokens.set(key, value);
+            inMemorySessionTokens.set(key, { value, expiresAt: Date.now() + SESSION_TOKEN_TTL_MS });
         }
     },
     async delete(key) {
@@ -163,12 +194,19 @@ export const sessionTokensStorage = {
         if (redis) {
             return (await redis.exists(`session:${key}`)) === 1;
         }
-        return inMemorySessionTokens.has(key);
+        const entry = inMemorySessionTokens.get(key);
+        if (!entry)
+            return false;
+        if (Date.now() > entry.expiresAt) {
+            inMemorySessionTokens.delete(key);
+            return false;
+        }
+        return true;
     },
     async size() {
         const redis = getRedisClient();
         if (redis) {
-            return await redis.dbsize(); // Note: this returns total keys, not just session keys
+            return await redis.dbsize();
         }
         return inMemorySessionTokens.size;
     },
@@ -184,14 +222,16 @@ export const sessionTokensStorage = {
             for (const key of keys) {
                 const raw = await withRedisTimeout(redis.get(key), 2000);
                 if (raw && typeof raw === 'string') {
-                    // Remove 'session:' prefix
                     const cleanKey = key.substring(8);
                     entries.push([cleanKey, JSON.parse(raw)]);
                 }
             }
             return entries;
         }
-        return Array.from(inMemorySessionTokens.entries());
+        const now = Date.now();
+        return Array.from(inMemorySessionTokens.entries())
+            .filter(([, entry]) => now <= entry.expiresAt)
+            .map(([k, entry]) => [k, entry.value]);
     },
     async clearAll() {
         const redis = getRedisClient();

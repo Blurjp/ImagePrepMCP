@@ -4,7 +4,7 @@
  */
 
 import sharp from "sharp";
-import { mkdir } from "fs/promises";
+import { mkdir, writeFile } from "fs/promises";
 import { join, dirname } from "path";
 import { existsSync } from "fs";
 import { ImageEncoder, EncodedImage, EncodeOptions } from "./encode.js";
@@ -155,16 +155,12 @@ ImageEncoder.prototype.encodeToFit = async function(
 ): Promise<EncodedImage> {
   const { maxBytes, maxLongEdge, preferFormat } = options;
 
-  // Ensure output directory exists
-  const { mkdirSync } = await import("fs");
   if (!existsSync(dirname(outputPath))) {
     await mkdir(dirname(outputPath), { recursive: true });
   }
 
-  // Build pipeline
   let pipeline = sharp(inputPath);
 
-  // Extract region if specified
   if (region) {
     pipeline = pipeline.extract({
       left: region.left,
@@ -174,12 +170,10 @@ ImageEncoder.prototype.encodeToFit = async function(
     });
   }
 
-  // Get metadata after potential extraction
   const metadata = await pipeline.clone().metadata();
   const originalWidth = metadata.width || 0;
   const originalHeight = metadata.height || 0;
 
-  // Calculate initial scale factor if needed
   const longEdge = Math.max(originalWidth, originalHeight);
   let scaleFactor = longEdge > maxLongEdge ? maxLongEdge / longEdge : 1;
 
@@ -189,7 +183,6 @@ ImageEncoder.prototype.encodeToFit = async function(
     ? outputPath
     : `${outputPath}.${extension}`;
 
-  // Try encoding with different quality settings
   let bestResult: EncodedImage | null = null;
   const qualityLevels = [95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25, 20];
 
@@ -218,31 +211,28 @@ ImageEncoder.prototype.encodeToFit = async function(
         encodePipeline = encodePipeline.jpeg({ quality, mozjpeg: true });
       }
 
-      const info = await encodePipeline.clone().metadata();
-      const width = info.width || 0;
-      const height = info.height || 0;
-
-      await encodePipeline.toFile(finalOutputPath);
-
-      const { statSync } = await import("fs");
-      const bytes = statSync(finalOutputPath).size;
+      const { data, info } = await encodePipeline.toBuffer({ resolveWithObject: true });
 
       const result: EncodedImage = {
         path: finalOutputPath,
-        bytes,
-        width,
-        height,
+        bytes: data.length,
+        width: info.width,
+        height: info.height,
         format,
         quality,
         scaleFactor,
       };
 
-      if (bytes <= maxBytes) {
+      if (data.length <= maxBytes) {
+        await writeFile(finalOutputPath, data);
         bestResult = result;
         break;
       }
 
-      bestResult = result;
+      if (!bestResult || data.length < bestResult.bytes) {
+        await writeFile(finalOutputPath, data);
+        bestResult = result;
+      }
     } catch (error) {
       break;
     }
@@ -278,31 +268,28 @@ ImageEncoder.prototype.encodeToFit = async function(
             encodePipeline = encodePipeline.jpeg({ quality, mozjpeg: true });
           }
 
-          const info = await encodePipeline.clone().metadata();
-          const width = info.width || 0;
-          const height = info.height || 0;
-
-          await encodePipeline.toFile(finalOutputPath);
-
-          const { statSync } = await import("fs");
-          const bytes = statSync(finalOutputPath).size;
+          const { data, info } = await encodePipeline.toBuffer({ resolveWithObject: true });
 
           const result: EncodedImage = {
             path: finalOutputPath,
-            bytes,
-            width,
-            height,
+            bytes: data.length,
+            width: info.width,
+            height: info.height,
             format,
             quality,
             scaleFactor,
           };
 
-          if (bytes <= maxBytes) {
+          if (data.length <= maxBytes) {
+            await writeFile(finalOutputPath, data);
             bestResult = result;
             break;
           }
 
-          bestResult = result;
+          if (!bestResult || data.length < bestResult.bytes) {
+            await writeFile(finalOutputPath, data);
+            bestResult = result;
+          }
         } catch (error) {
           break;
         }

@@ -135,18 +135,25 @@ class RateLimiter {
     requests;
     maxRequests;
     windowMs;
+    static MAX_ENTRIES = 10000;
     constructor(maxRequests = 100, windowMs = 60000) {
         this.requests = new Map();
         this.maxRequests = maxRequests;
         this.windowMs = windowMs;
-        // Clean up expired entries every minute
         setInterval(() => this.cleanup(), 60000);
     }
     check(identifier) {
         const now = Date.now();
         const record = this.requests.get(identifier);
         if (!record || now > record.resetTime) {
-            // First request or window expired
+            if (this.requests.size >= RateLimiter.MAX_ENTRIES) {
+                this.cleanup();
+                if (this.requests.size >= RateLimiter.MAX_ENTRIES) {
+                    const firstKey = this.requests.keys().next().value;
+                    if (firstKey !== undefined)
+                        this.requests.delete(firstKey);
+                }
+            }
             this.requests.set(identifier, {
                 count: 1,
                 resetTime: now + this.windowMs,
@@ -183,6 +190,7 @@ class FigmaSmartImageServer {
     figmaToken; // Default token (from env/file for local dev)
     transportMode;
     sessionTransports; // Track transports per session (in-memory, per-instance)
+    static MAX_SESSION_TRANSPORTS = 1000;
     rateLimiter;
     oauthStates; // OAuth state management
     oauthAuthCodes;
@@ -260,20 +268,31 @@ class FigmaSmartImageServer {
      * Note: Redis handles TTL automatically, this is for in-memory fallback
      */
     cleanupExpiredSessions() {
-        // Redis handles TTL automatically, so no cleanup needed there
-        // Only clean up in-memory transports
         const now = Date.now();
         for (const [sessionId, transport] of this.sessionTransports.entries()) {
-            // Clean up stale transports (no activity for 1 hour)
-            // Note: sessionTransports is per-instance and doesn't need Redis
             if (transport && (now - transport.lastActivity > 60 * 60 * 1000)) {
                 this.sessionTransports.delete(sessionId);
+            }
+        }
+        // Evict oldest entries if over cap
+        if (this.sessionTransports.size > FigmaSmartImageServer.MAX_SESSION_TRANSPORTS) {
+            const sorted = Array.from(this.sessionTransports.entries())
+                .sort((a, b) => (a[1].lastActivity || 0) - (b[1].lastActivity || 0));
+            const toRemove = sorted.slice(0, this.sessionTransports.size - FigmaSmartImageServer.MAX_SESSION_TRANSPORTS);
+            for (const [key] of toRemove) {
+                this.sessionTransports.delete(key);
             }
         }
         // Clean up expired OAuth auth codes (10 minutes)
         for (const [code, entry] of this.oauthAuthCodes.entries()) {
             if (now - entry.createdAt > 10 * 60 * 1000) {
                 this.oauthAuthCodes.delete(code);
+            }
+        }
+        // Clean up expired OAuth states (10 minutes)
+        for (const [state, entry] of this.oauthStates.entries()) {
+            if (now - entry.createdAt > 10 * 60 * 1000) {
+                this.oauthStates.delete(state);
             }
         }
     }
@@ -705,30 +724,35 @@ class FigmaSmartImageServer {
                     text: responseText,
                 },
             ];
+            const MAX_BASE64_BYTES = 8 * 1024 * 1024;
             // Add overview image
             try {
-                const overviewData = await readFile(overview.path);
-                const overviewBase64 = overviewData.toString('base64');
-                content.push({
-                    type: "image",
-                    data: overviewBase64,
-                    mimeType: `image/${overview.format}`,
-                });
+                if (overview.bytes <= MAX_BASE64_BYTES) {
+                    const overviewData = await readFile(overview.path);
+                    content.push({
+                        type: "image",
+                        data: overviewData.toString('base64'),
+                        mimeType: `image/${overview.format}`,
+                    });
+                }
             }
             catch (error) {
                 console.error(`Failed to read overview image: ${error}`);
             }
-            // Add first few tiles
+            // Add first few tiles (limit total base64 payload)
+            let base64BytesUsed = overview.bytes <= MAX_BASE64_BYTES ? overview.bytes : 0;
             const maxTilesToInclude = Math.min(6, tiles.length);
             for (let i = 0; i < maxTilesToInclude; i++) {
+                if (base64BytesUsed + tiles[i].bytes > MAX_BASE64_BYTES)
+                    break;
                 try {
                     const tileData = await readFile(tiles[i].path);
-                    const tileBase64 = tileData.toString('base64');
                     content.push({
                         type: "image",
-                        data: tileBase64,
+                        data: tileData.toString('base64'),
                         mimeType: `image/${overview.format}`,
                     });
+                    base64BytesUsed += tiles[i].bytes;
                 }
                 catch (error) {
                     console.error(`Failed to read tile ${i}: ${error}`);

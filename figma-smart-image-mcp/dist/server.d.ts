@@ -13,6 +13,7 @@ declare class FigmaSmartImageServer {
     private figmaToken;
     private transportMode;
     private sessionTransports;
+    private static readonly MAX_SESSION_TRANSPORTS;
     private rateLimiter;
     private oauthStates;
     private oauthAuthCodes;

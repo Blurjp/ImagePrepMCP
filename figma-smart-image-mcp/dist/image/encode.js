@@ -3,7 +3,7 @@
  * Handles resizing and format conversion to meet size constraints.
  */
 import sharp from "sharp";
-import { mkdir } from "fs/promises";
+import { mkdir, writeFile } from "fs/promises";
 import { dirname } from "path";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { createRequire } from "module";
@@ -82,35 +82,29 @@ export class ImageEncoder {
      * Try encoding with specific parameters.
      */
     async tryEncode(inputPath, outputPath, scaleFactor, quality, format, maxBytes) {
-        const pipeline = sharp(inputPath);
-        // Resize if scale factor < 1
+        let pipeline = sharp(inputPath);
         if (scaleFactor < 1) {
             const metadata = await sharp(inputPath).metadata();
             const newWidth = Math.round((metadata.width || 0) * scaleFactor);
             const newHeight = Math.round((metadata.height || 0) * scaleFactor);
-            pipeline.resize(newWidth, newHeight);
+            pipeline = pipeline.resize(newWidth, newHeight);
         }
-        // Set format options
         if (format === "webp") {
-            pipeline.webp({ quality, effort: 4 });
+            pipeline = pipeline.webp({ quality, effort: 4 });
         }
         else {
-            pipeline.jpeg({ quality, mozjpeg: true });
+            pipeline = pipeline.jpeg({ quality, mozjpeg: true });
         }
-        // Get info before saving
-        const info = await pipeline.clone().metadata();
-        const width = info.width || 0;
-        const height = info.height || 0;
-        // Save to file
-        await pipeline.toFile(outputPath);
-        // Get file size
-        const { statSync } = await import("fs");
-        const bytes = statSync(outputPath).size;
+        const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
+        if (!existsSync(dirname(outputPath))) {
+            await mkdir(dirname(outputPath), { recursive: true });
+        }
+        await writeFile(outputPath, data);
         return {
             path: outputPath,
-            bytes,
-            width,
-            height,
+            bytes: data.length,
+            width: info.width,
+            height: info.height,
             format,
             quality,
             scaleFactor,
